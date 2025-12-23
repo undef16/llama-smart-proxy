@@ -90,7 +90,7 @@ class ServerPool:
         try:
             # Start the llama-server subprocess
             process = subprocess.Popen(
-                ['llama-server', '-hf', model_identifier, '--port', str(server.port), '--host', '127.0.0.1'],
+                ['llama-server', '-hf', model_identifier, '--port', str(server.port), '--host', '127.0.0.1', '--log-verbosity', '0'],
                 # , '--api'
                 # stdout=subprocess.PIPE,
                 # stderr=subprocess.PIPE

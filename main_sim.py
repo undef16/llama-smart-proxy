@@ -13,6 +13,7 @@ import requests
 import json
 import sys
 import os
+import concurrent.futures
 from src.proxy.config import Config
 class E2ESimulation:
     """Handles end-to-end simulation of the Llama Smart Proxy."""
@@ -24,6 +25,21 @@ class E2ESimulation:
         if self.config.simulation is None:
             raise ValueError("Simulation configuration is required for this script")
         self.sim = self.config.simulation
+
+    def get_base_request_data(self):
+        """Get the base request data for chat completion."""
+        return {
+            "model": self.sim.model,
+            "messages": [msg.dict() for msg in self.sim.messages]
+        }
+
+    def send_request(self, endpoint, data):
+        """Send a POST request to the specified endpoint with the given data."""
+        return requests.post(
+            self.sim.server_url + endpoint,
+            json=data,
+            timeout=self.sim.request_timeout
+        )
 
     def wait_for_server(self, url: str, timeout: int = 30):
         """Wait for the server to be ready by checking the health endpoint."""
@@ -49,13 +65,11 @@ class E2ESimulation:
             return result
 
         try:
-            # Prepare the request data
-            if not self.check_completion():
-                return result
-                
-            # Test forwarding endpoints
-            if not self.check_forwarding_endpoints():
-                return result
+            # Run all checks
+            checks = [self.check_completion, self.check_parallel_requests, self.check_forwarding_endpoints]
+            for check in checks:
+                if not check():
+                    return result
 
             result = 0
         except requests.RequestException as e:
@@ -75,29 +89,57 @@ class E2ESimulation:
 
     def check_completion(self):
         result = False
-        request_data = {
-                "model": self.sim.model,
-                "messages": [msg.dict() for msg in self.sim.messages]
-            }
+        request_data = self.get_base_request_data()
 
-            # Send the request
-        response = requests.post(
-                self.sim.server_url + self.sim.chat_endpoint,
-                json=request_data,
-                timeout=self.sim.request_timeout
-            )
+        # Send the request
+        response = self.send_request(self.sim.chat_endpoint, request_data)
 
         if response.status_code == 200:
-            result = response.json()
+            response_data = response.json()
             print("Request successful!")
             print("Response:")
-            print(json.dumps(result, indent=2))
+            print(json.dumps(response_data, indent=2))
             result = True
         else:
             print(f"Request failed with status code: {response.status_code}")
             print(f"Response: {response.text}")
-            
+
         return result
+
+    def check_parallel_requests(self):
+        """Test parallel concurrent requests to the chat completion endpoint."""
+        print("Testing parallel requests...")
+
+        request_data = self.get_base_request_data()
+        request_data["max_tokens"] = 512
+
+        def send_request():
+            try:
+                response = self.send_request(self.sim.chat_endpoint, request_data)
+                if response.status_code == 200:
+                    result = response.json()
+                    print(f'Response: {result}')
+                    # Check if response has choices with content
+                    if 'choices' in result and len(result['choices']) > 0 and 'message' in result['choices'][0]:
+                        return True
+                    else:
+                        return False
+                else:
+                    return False
+            except requests.RequestException:
+                return False
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(send_request) for _ in range(4)]
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+        success_count = sum(results)
+        if success_count == 4:
+            print("All parallel requests successful!")
+            return True
+        else:
+            print(f"Parallel requests failed: {success_count}/4 successful")
+            return False
 
     def check_forwarding_endpoints(self):
         """Test forwarding of endpoints that are not processed by the proxy."""
@@ -116,11 +158,7 @@ class E2ESimulation:
         success_count = 0
         for endpoint in forwarding_endpoints:
             try:
-                response = requests.post(
-                    self.sim.server_url + endpoint,
-                    json={"model": self.sim.model},  
-                    timeout=self.sim.request_timeout
-                )
+                response = self.send_request(endpoint, {"model": self.sim.model})
                 # print(f"Response: {response.json()}")
                 if response.status_code == 200:
                     print(f"✓ {endpoint} forwarded successfully")
