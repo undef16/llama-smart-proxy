@@ -6,7 +6,7 @@ import pytest
 from unittest.mock import Mock, patch
 
 from src.proxy.agent_manager import AgentManager
-from src.proxy.types import AgentConfig, ChatCompletionRequest, ChatCompletionResponse, Message
+from src.proxy.types import AgentConfig, Message
 
 
 class TestAgentManager:

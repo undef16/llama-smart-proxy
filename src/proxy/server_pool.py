@@ -1,8 +1,8 @@
 import time
 import asyncio
+import subprocess
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass
-from llama_cpp import Llama
 from .config import ServerPoolConfig
 from .model_resolver import ModelResolver
 from .common_imports import Logger
@@ -12,9 +12,10 @@ logger = Logger.get(__name__)
 
 @dataclass
 class ServerInstance:
-    """Represents a single llama.cpp server instance."""
+    """Represents a single llama-server subprocess instance."""
     id: int
-    llama: Optional[Llama] = None
+    process: Optional[subprocess.Popen] = None
+    port: int = 0
     model: Optional[str] = None  # The model identifier loaded
     last_used: float = 0.0
     is_healthy: bool = True
@@ -34,7 +35,8 @@ class ServerPool:
     def _initialize_servers(self) -> None:
         """Initialize the server pool with empty server instances."""
         for i in range(self.config.size):
-            self.servers.append(ServerInstance(id=i))
+            port = self.config.port_start + i
+            self.servers.append(ServerInstance(id=i, port=port))
 
     async def get_server_for_model(self, model_identifier: str) -> Optional[ServerInstance]:
         """
@@ -56,7 +58,7 @@ class ServerPool:
 
         # Then, find an idle server (no model loaded)
         for server in self.servers:
-            if server.llama is None and server.is_healthy:
+            if server.process is None and server.is_healthy:
                 if await self._load_model_into_server(server, model_identifier):
                     server.last_used = time.time()
                     return server
@@ -75,38 +77,47 @@ class ServerPool:
 
     async def _load_model_into_server(self, server: ServerInstance, model_identifier: str) -> bool:
         """
-        Load a model into a server instance.
+        Start a llama-server subprocess for the model.
 
         Args:
-            server: The server instance to load into.
+            server: The server instance to start.
             model_identifier: The model identifier.
 
         Returns:
             True if successful, False otherwise.
         """
-        logger.debug(f"Loading model {model_identifier} into server {server.id}")
+        logger.debug(f"Starting llama-server for model {model_identifier} on port {server.port}")
         try:
-            repo_id, filename_pattern = ModelResolver.resolve(model_identifier)
-            logger.debug(f"Resolved to repo_id={repo_id}, pattern={filename_pattern}")
-
-            # Use Llama.from_pretrained to download and load the model
-            # This is already properly wrapped in asyncio.to_thread
-            llama = await asyncio.to_thread(
-                Llama.from_pretrained,
-                repo_id=repo_id,
-                filename=filename_pattern,
-                verbose=False,
-                # chat_format="openai",  # Set chat format for chat completions
+            # Start the llama-server subprocess
+            process = subprocess.Popen(
+                ['llama-server', '-hf', model_identifier, '--port', str(server.port), '--host', '127.0.0.1'],
+                # , '--api'
+                # stdout=subprocess.PIPE,
+                # stderr=subprocess.PIPE
             )
-
-            server.llama = llama
+            server.process = process
             server.model = model_identifier
-            server.is_healthy = True
-            logger.info(f"Loaded model {model_identifier} into server {server.id}")
-            return True
+
+            # Wait for the server to be ready
+            import httpx
+            for _ in range(30):  # Wait up to 30 seconds
+                await asyncio.sleep(1)
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(f"http://127.0.0.1:{server.port}/health", timeout=1.0)
+                        if response.status_code == 200:
+                            server.is_healthy = True
+                            logger.info(f"Started llama-server for model {model_identifier} on port {server.port}")
+                            return True
+                except:
+                    continue
+
+            logger.error(f"llama-server did not become ready for model {model_identifier} on port {server.port}")
+            server.is_healthy = False
+            return False
 
         except Exception as e:
-            logger.error(f"Failed to load model {model_identifier} into server {server.id}: {e}")
+            logger.error(f"Failed to start llama-server for model {model_identifier} on port {server.port}: {e}")
             server.is_healthy = False
             return False
 
@@ -115,17 +126,25 @@ class ServerPool:
         Check the health of all servers.
         Marks unhealthy servers and attempts to recover them.
         """
+        import httpx
         for server in self.servers:
-            if server.llama is not None:
+            if server.process is not None:
                 try:
-                    # Simple health check: try to tokenize a short string
-                    # Wrap in asyncio.to_thread since tokenize might be blocking
-                    await asyncio.to_thread(server.llama.tokenize, "test".encode('utf-8'))
-                    server.is_healthy = True
+                    # Check if process is still running
+                    if server.process.poll() is not None:
+                        raise Exception("Process has terminated")
+
+                    # Ping the health endpoint
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(f"http://localhost:{server.port}/health", timeout=5.0)
+                        if response.status_code == 200:
+                            server.is_healthy = True
+                        else:
+                            raise Exception(f"Health check returned {response.status_code}")
                 except Exception as e:
                     logger.warning(f"Server {server.id} health check failed: {e}")
                     server.is_healthy = False
-                    # Attempt to reload the model
+                    # Attempt to restart the server
                     if server.model:
                         await self._load_model_into_server(server, server.model)
 
@@ -149,8 +168,12 @@ class ServerPool:
     def shutdown(self) -> None:
         """Shutdown all servers in the pool."""
         for server in self.servers:
-            if server.llama is not None:
-                # Llama doesn't have an explicit close method, but we can set to None
-                server.llama = None
+            if server.process is not None:
+                server.process.terminate()
+                try:
+                    server.process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    server.process.kill()
+                server.process = None
                 server.model = None
         logger.info("Server pool shutdown complete")

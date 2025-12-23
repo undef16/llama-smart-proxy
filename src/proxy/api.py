@@ -6,12 +6,12 @@ from typing import List
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
-import requests
+import httpx
 
 from .config import Config
 from .server_pool import ServerPool
 from .agent_manager import AgentManager
-from .types import ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChoice, ChatCompletionUsage, Message
+from .types import Message
 from .common_imports import Logger
 
 logger = Logger.get(__name__)
@@ -40,7 +40,7 @@ class API:
             # Shutdown logic
             self.server_pool.shutdown()
 
-        self.app = FastAPI(title="Llama Smart Proxy", version="1.0.0", lifespan=lifespan)
+        self.app = FastAPI(title="Llama Smart Proxy", version="0.1.0", lifespan=lifespan)
         self.server_pool = ServerPool(config.server_pool)
         self.agent_manager = AgentManager(enabled_agents=config.agents)
 
@@ -62,58 +62,24 @@ class API:
 
             logger.debug(f"Getting server for model: {model}")
             server = await self.server_pool.get_server_for_model(model)
-            if server is None or server.llama is None:
+            if server is None or server.process is None:
                 return JSONResponse(
                     status_code=503,
                     content={"error": "No available server for the requested model"}
                 )
+                
+            url = f"http://localhost:{server.port}/{path}"
+            logger.debug(f"Forwarding to {url}")
 
-            path = request.url.path
-            logger.debug(f"Handling endpoint: {path}")
+            async with httpx.AsyncClient() as client:
+                if request.method == "GET":
+                    response = await client.get(url, timeout=30.0)
+                elif request.method == "POST":
+                    response = await client.post(url, json=body, timeout=30.0)
+                else:
+                    return JSONResponse(status_code=405, content={"error": "Method not allowed"})
 
-            if path == "/tokenize":
-                content = body.get("content", "")
-                tokens = await asyncio.to_thread(
-                    server.llama.tokenize,
-                    content.encode('utf-8')
-                )
-                return JSONResponse({"tokens": tokens})
-
-            elif path == "/detokenize":
-                tokens = body.get("tokens", [])
-                content = await asyncio.to_thread(
-                    server.llama.detokenize,
-                    tokens
-                )
-                return JSONResponse({"content": content.decode('utf-8')})
-
-            elif path == "/embedding":
-                content = body.get("content", "")
-                embedding = await asyncio.to_thread(
-                    server.llama.embed,
-                    content
-                )
-                return JSONResponse({"embedding": embedding})
-
-            elif path == "/props":
-                props = {
-                    "model": server.model,
-                    "vocab_size": server.llama.n_vocab(),
-                    "context_length": server.llama.n_ctx(),
-                    "embedding_size": server.llama.n_embd(),
-                    "eos_token": server.llama.token_eos(),
-                    "bos_token": server.llama.token_bos(),
-                    "nl_token": server.llama.token_nl(),
-                    "pooling_type": server.llama.pooling_type(),
-                    "metadata": server.llama.metadata,
-                }
-                return JSONResponse(props)
-
-            else:
-                return JSONResponse(
-                    status_code=404,
-                    content={"error": "Endpoint not found"}
-                )
+                return JSONResponse(status_code=response.status_code, content=response.json())
 
         except Exception as e:
             logger.error(f"Error handling forwarding request: {e}")
@@ -138,52 +104,35 @@ class API:
         # Catch-all route for forwarding all other requests to backend server without processing
         self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])(self._forward_request)
 
-    async def _generate_completion(self, server, messages: List[Message]) -> str:
+    async def _generate_completion(self, server, request: dict) -> dict:
         """
-        Generate completion using llama.cpp server with proper error handling.
+        Generate completion by forwarding to llama-server subprocess.
         """
-        logger.debug(f"Starting generation with messages: {[msg.dict() for msg in messages]}")
         try:
-            # Format messages into a chat prompt string
-            prompt_parts = []
-            for msg in messages:
-                if msg.role == "system":
-                    prompt_parts.append(f"System: {msg.content}")
-                elif msg.role == "user":
-                    prompt_parts.append(f"User: {msg.content}")
-                elif msg.role == "assistant":
-                    prompt_parts.append(f"Assistant: {msg.content}")
-            prompt = "\n".join(prompt_parts) + "\nAssistant:"
-            logger.debug(f"Formatted prompt: {prompt}")
+            # Prepare the request data for llama-server OpenAI API
 
-            output = await asyncio.to_thread(
-                server.llama,
-                prompt,
-                max_tokens=100,  # Limit response length
-                stop=["\n"],  # Basic stop sequence
-            )
-            logger.debug(f"Generation completed, output: {output}")
-            return output["choices"][0]["text"].strip()
+            url = f"http://localhost:{server.port}/v1/chat/completions"
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=request, timeout=60.0)
+                if response.status_code != 200:
+                    raise Exception(f"llama-server returned {response.status_code}: {response.text}")
+
+                result = response.json()
+                return result
         except Exception as e:
             logger.debug(f"Generation failed: {e}")
             raise HTTPException(status_code=500, detail=f"Model generation failed: {str(e)}")
 
-    async def chat_completions(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
+    async def chat_completions(self, request: dict) -> dict:
         """
         Handle chat completion requests with model resolution, server selection,
         agent execution, and llama.cpp forwarding.
         """
         try:
             # Extract the last user message for agent parsing
-            if not request.messages:
-                raise HTTPException(status_code=400, detail="No messages provided")
-
-            last_message = request.messages[-1]
-            if last_message.role != "user":
-                raise HTTPException(status_code=400, detail="Last message must be from user")
 
             # Parse slash commands to build agent chain
-            agent_names = self.agent_manager.parse_slash_commands(last_message.content)
+            agent_names = self.agent_manager.parse_slash_commands(request.get("content", ""))
             agent_chain = self.agent_manager.build_agent_chain(agent_names)
 
             # Execute request hooks
@@ -191,48 +140,24 @@ class API:
 
             logger.debug("Getting server for model")
             # Get server for the model
-            server = await self.server_pool.get_server_for_model(processed_request.model)
+            model = processed_request.get("model")
+            if not model or not isinstance(model, str):
+                raise HTTPException(status_code=400, detail="Model must be a non-empty string")
+            
+            server = await self.server_pool.get_server_for_model(model)
             logger.debug(f"Server obtained: {server is not None}")
-            if server is None or server.llama is None:
+            if server is None or server.process is None:
                 raise HTTPException(status_code=503, detail="No available server for the requested model")
 
-            # Generate completion using llama.cpp
-            completion_text = await self._generate_completion(
+            # Generate completion by forwarding to llama-server
+            processed_response = await self._generate_completion(
                 server,
-                processed_request.messages
+                processed_request
             )
 
-            # Create response
-            response_id = str(uuid.uuid4())
-            created = int(time.time())
-
-            choice = ChatCompletionChoice(
-                index=0,
-                message=Message(role="assistant", content=completion_text),
-                finish_reason="stop"
-            )
-
-            # Estimate usage (llama.cpp doesn't provide exact token counts)
-            prompt_tokens = sum(len(msg.content.split()) for msg in processed_request.messages)  # Rough estimate
-            completion_tokens = len(completion_text.split())  # Rough estimate
-
-            usage = ChatCompletionUsage(
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=prompt_tokens + completion_tokens
-            )
-
-            response = ChatCompletionResponse(
-                id=response_id,
-                object="chat.completion",
-                created=created,
-                model=processed_request.model,
-                choices=[choice],
-                usage=usage
-            )
 
             # Execute response hooks
-            final_response = self.agent_manager.execute_response_hooks(response, agent_chain)
+            final_response = self.agent_manager.execute_response_hooks(processed_response, agent_chain)
 
             return final_response
 

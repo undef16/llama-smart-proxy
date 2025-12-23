@@ -2,7 +2,7 @@
   "server_pool": {
     "size": 2,
     "host": "localhost",
-    "port_start": 8001
+    "port_start": 11601
   },
   "models": {
     "Qwen3-0.6B": {

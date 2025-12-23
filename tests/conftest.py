@@ -9,7 +9,7 @@ from typing import Dict, List
 import pytest
 
 from src.proxy.config import Config, ServerPoolConfig, ModelConfig
-from src.proxy.types import ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChoice, ChatCompletionUsage, Message, AgentConfig
+from src.proxy.types import Message, AgentConfig
 
 
 @pytest.fixture
@@ -104,39 +104,36 @@ def model_resolver_test_cases():
 @pytest.fixture
 def sample_chat_request():
     """Sample chat completion request for testing."""
-    return ChatCompletionRequest(
-        model="test-model",
-        messages=[
-            Message(role="user", content="Hello, how are you?"),
-            Message(role="assistant", content="I'm doing well, thank you!"),
-            Message(role="user", content="Can you help me with something?")
+    return {
+        "model": "test-model",
+        "messages": [
+            {"role": "user", "content": "Hello, how are you?"},
+            {"role": "assistant", "content": "I'm doing well, thank you!"},
+            {"role": "user", "content": "Can you help me with something?"}
         ],
-        temperature=0.7,
-        max_tokens=100,
-        stream=False
-    )
+        "temperature": 0.7,
+        "max_tokens": 100,
+        "stream": False
+    }
 
 
 @pytest.fixture
 def sample_chat_response():
     """Sample chat completion response for testing."""
-    return ChatCompletionResponse(
-        id="test-response-123",
-        created=1234567890,
-        model="test-model",
-        choices=[
-            ChatCompletionChoice(
-                index=0,
-                message=Message(role="assistant", content="I'd be happy to help you!"),
-                finish_reason="stop"
-            )
+    return {
+        "id": "test-response-123",
+        "created": 1234567890,
+        "model": "test-model",
+        "object": "chat.completion",
+        "choices": [
+            {"role": "assistant", "content": "I'd be happy to help you!"}
         ],
-        usage=ChatCompletionUsage(
-            prompt_tokens=15,
-            completion_tokens=10,
-            total_tokens=25
-        )
-    )
+        "usage": {
+            "prompt_tokens": 15,
+            "completion_tokens": 10,
+            "total_tokens": 25
+        }
+    }
 
 
 @pytest.fixture
@@ -158,11 +155,11 @@ def mock_agent():
             self.process_request_calls = []
             self.process_response_calls = []
 
-        def process_request(self, request: ChatCompletionRequest) -> ChatCompletionRequest:
+        def process_request(self, request: dict) -> dict:
             self.process_request_calls.append(request)
             return request
 
-        def process_response(self, response: ChatCompletionResponse) -> ChatCompletionResponse:
+        def process_response(self, response: dict) -> dict:
             self.process_response_calls.append(response)
             return response
 

@@ -2,7 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 from typing import List, Dict, Optional
-from .types import Agent, AgentConfig, ChatCompletionRequest, ChatCompletionResponse
+from .types import Agent, AgentConfig
 from .common_imports import Logger
 
 logger = Logger.get(__name__)
@@ -91,11 +91,11 @@ class AgentManager:
                 logger.error(f"Error in hook for agent {agent}: {e}")
         return current_obj
 
-    def execute_request_hooks(self, request: ChatCompletionRequest, agent_chain: List[Agent]) -> ChatCompletionRequest:
+    def execute_request_hooks(self, request: dict, agent_chain: List[Agent]) -> dict:
         """Execute request hooks in deterministic order."""
         return self._execute_hooks_safely(agent_chain, request, lambda agent, req: agent.process_request(req))
 
-    def execute_response_hooks(self, response: ChatCompletionResponse, agent_chain: List[Agent]) -> ChatCompletionResponse:
+    def execute_response_hooks(self, response: dict, agent_chain: List[Agent]) -> dict:
         """Execute response hooks in deterministic order."""
         return self._execute_hooks_safely(agent_chain, response, lambda agent, res: agent.process_response(res))
 

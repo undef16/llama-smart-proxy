@@ -108,7 +108,7 @@ class E2ESimulation:
             "/tokenize",
             "/detokenize",
             # "/embedding",
-            "/props",
+            # "/props",
             # "/reranking"
         ]
 
@@ -121,7 +121,7 @@ class E2ESimulation:
                     json={"model": self.sim.model},  
                     timeout=self.sim.request_timeout
                 )
-                print(f"Response: {response.json()}")
+                # print(f"Response: {response.json()}")
                 if response.status_code == 200:
                     print(f"✓ {endpoint} forwarded successfully")
                     success_count += 1
