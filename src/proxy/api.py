@@ -32,6 +32,7 @@ class API:
     def _register_routes(self):
         """Register all API routes."""
         self.app.post("/chat/completions")(self.chat_completions)
+        self.app.post("/completions")(self.chat_completions)        
         self.app.get("/health")(self.health)
         self.app.on_event("shutdown")(self.shutdown_event)
 

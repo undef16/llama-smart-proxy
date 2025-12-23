@@ -5,14 +5,25 @@
     "port_start": 8001
   },
   "models": {
-    "llama-7b": {
-      "repo": "TheBloke/Llama-2-7B-Chat-GGUF",
-      "variant": "llama-2-7b-chat.Q4_K_M.gguf"
-    },
-    "llama-13b": {
-      "repo": "TheBloke/Llama-2-13B-Chat-GGUF",
-      "variant": "llama-2-13b-chat.Q4_K_M.gguf"
+    "Qwen3-0.6B": {
+      "repo": "unsloth/Qwen3-0.6B-GGUF",
+      "variant": "Qwen3-0.6B.Q4_K_M.gguf"
     }
   },
-  "agents": ["rag", "parallel"]
+  "agents": [],
+  "simulation": {
+    "server_url": "http://localhost:8000",
+    "health_endpoint": "/health",
+    "chat_endpoint": "/chat/completions",
+    "wait_timeout": 30,
+    "request_timeout": 300,
+    "terminate_timeout": 10,
+    "model": "unsloth/Qwen3-0.6B-GGUF:Q4_K_M",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Tell me a joke about a python programmer."
+      }
+    ]
+  }
 }

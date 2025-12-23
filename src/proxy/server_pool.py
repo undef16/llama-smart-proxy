@@ -95,6 +95,7 @@ class ServerPool:
                 Llama.from_pretrained,
                 repo_id=repo_id,
                 filename=filename_pattern,
+                verbose=False,
                 # chat_format="openai",  # Set chat format for chat completions
             )
 
@@ -135,7 +136,7 @@ class ServerPool:
         Returns:
             Dict with pool information.
         """
-        return {
+        result = {
             "total_servers": len(self.servers),
             "healthy_servers": sum(1 for s in self.servers if s.is_healthy),
             "loaded_models": [
@@ -143,6 +144,7 @@ class ServerPool:
                 for s in self.servers if s.model is not None
             ],
         }
+        return result
 
     def shutdown(self) -> None:
         """Shutdown all servers in the pool."""

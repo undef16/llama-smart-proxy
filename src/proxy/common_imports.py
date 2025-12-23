@@ -2,11 +2,12 @@ import logging
 from typing import Dict, List
 
 from pydantic import BaseModel, Field
-
-
 class Logger:
+    """Utility class for standardized logging configuration."""
     @staticmethod
     def get(name: str) -> logging.Logger:
+
+
         """
         Get a standardized logger for the application.
         Configures logging with basic setup if not already configured.
