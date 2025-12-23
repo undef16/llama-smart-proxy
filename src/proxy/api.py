@@ -1,9 +1,12 @@
 import time
 import uuid
 import asyncio
+import json
 from typing import List
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
+import requests
 
 from .config import Config
 from .server_pool import ServerPool
@@ -21,20 +24,119 @@ class API:
     """
 
     def __init__(self, config: Config):
+        """
+        Initialize the API with configuration.
+
+        Args:
+            config: Configuration object containing server pool, models, agents, and backend settings.
+        """
         self.config = config
-        self.app = FastAPI(title="Llama Smart Proxy", version="1.0.0")
+
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            """Handle application startup and shutdown events."""
+            # Startup logic can be added here if needed
+            yield
+            # Shutdown logic
+            self.server_pool.shutdown()
+
+        self.app = FastAPI(title="Llama Smart Proxy", version="1.0.0", lifespan=lifespan)
         self.server_pool = ServerPool(config.server_pool)
         self.agent_manager = AgentManager(enabled_agents=config.agents)
 
         # Register routes
         self._register_routes()
 
+    async def _forward_request(self, request: Request, path: str) -> Response:
+        """
+        Handle forwarding endpoints using the server pool.
+        """
+        try:
+            body = await request.json()
+            model = body.get("model")
+            if not model:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Model not specified"}
+                )
+
+            logger.debug(f"Getting server for model: {model}")
+            server = await self.server_pool.get_server_for_model(model)
+            if server is None or server.llama is None:
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "No available server for the requested model"}
+                )
+
+            path = request.url.path
+            logger.debug(f"Handling endpoint: {path}")
+
+            if path == "/tokenize":
+                content = body.get("content", "")
+                tokens = await asyncio.to_thread(
+                    server.llama.tokenize,
+                    content.encode('utf-8')
+                )
+                return JSONResponse({"tokens": tokens})
+
+            elif path == "/detokenize":
+                tokens = body.get("tokens", [])
+                content = await asyncio.to_thread(
+                    server.llama.detokenize,
+                    tokens
+                )
+                return JSONResponse({"content": content.decode('utf-8')})
+
+            elif path == "/embedding":
+                content = body.get("content", "")
+                embedding = await asyncio.to_thread(
+                    server.llama.embed,
+                    content
+                )
+                return JSONResponse({"embedding": embedding})
+
+            elif path == "/props":
+                props = {
+                    "model": server.model,
+                    "vocab_size": server.llama.n_vocab(),
+                    "context_length": server.llama.n_ctx(),
+                    "embedding_size": server.llama.n_embd(),
+                    "eos_token": server.llama.token_eos(),
+                    "bos_token": server.llama.token_bos(),
+                    "nl_token": server.llama.token_nl(),
+                    "pooling_type": server.llama.pooling_type(),
+                    "metadata": server.llama.metadata,
+                }
+                return JSONResponse(props)
+
+            else:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "Endpoint not found"}
+                )
+
+        except Exception as e:
+            logger.error(f"Error handling forwarding request: {e}")
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Internal proxy error", "detail": str(e)}
+            )
+
     def _register_routes(self):
-        """Register all API routes."""
+        """
+        Register all routes supported by llama.cpp server.
+
+        Custom routes (/chat/completions, /completions, /health) are handled with full processing
+        including agent execution and model resolution. All other endpoints are forwarded to the
+        backend llama.cpp server without any processing or modification.
+        """
+        # Custom routes with processing
         self.app.post("/chat/completions")(self.chat_completions)
-        self.app.post("/completions")(self.chat_completions)        
+        self.app.post("/completions")(self.chat_completions)
         self.app.get("/health")(self.health)
-        self.app.on_event("shutdown")(self.shutdown_event)
+
+        # Catch-all route for forwarding all other requests to backend server without processing
+        self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])(self._forward_request)
 
     async def _generate_completion(self, server, messages: List[Message]) -> str:
         """
@@ -150,9 +252,4 @@ class API:
             return JSONResponse(content=status)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
-
-    def shutdown_event(self):
-        """Shutdown the server pool on application shutdown."""
-        self.server_pool.shutdown()
-
 
