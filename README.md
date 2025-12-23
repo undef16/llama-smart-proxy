@@ -15,7 +15,7 @@ A smart proxy server for Llama models with agent-based request/response processi
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/undef16/llama-smart-proxy.git
 cd llama-smart-proxy
 ```
 
