@@ -1,0 +1,18 @@
+{
+  "server_pool": {
+    "size": 2,
+    "host": "localhost",
+    "port_start": 8001
+  },
+  "models": {
+    "llama-7b": {
+      "repo": "TheBloke/Llama-2-7B-Chat-GGUF",
+      "variant": "llama-2-7b-chat.Q4_K_M.gguf"
+    },
+    "llama-13b": {
+      "repo": "TheBloke/Llama-2-13B-Chat-GGUF",
+      "variant": "llama-2-13b-chat.Q4_K_M.gguf"
+    }
+  },
+  "agents": ["rag", "parallel"]
+}
