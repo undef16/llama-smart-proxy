@@ -6,7 +6,7 @@ from typing import List
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
-import httpx
+import requests
 
 from .config import Config
 from .server_pool import ServerPool
@@ -67,19 +67,18 @@ class API:
                     status_code=503,
                     content={"error": "No available server for the requested model"}
                 )
-                
+
             url = f"http://localhost:{server.port}/{path}"
             logger.debug(f"Forwarding to {url}")
 
-            async with httpx.AsyncClient() as client:
-                if request.method == "GET":
-                    response = await client.get(url, timeout=30.0)
-                elif request.method == "POST":
-                    response = await client.post(url, json=body, timeout=30.0)
-                else:
-                    return JSONResponse(status_code=405, content={"error": "Method not allowed"})
+            if request.method == "GET":
+                response = await asyncio.to_thread(requests.get, url, timeout=self.config.server_pool.request_timeout)
+            elif request.method == "POST":
+                response = await asyncio.to_thread(requests.post, url, json=body, timeout=self.config.server_pool.request_timeout)
+            else:
+                return JSONResponse(status_code=405, content={"error": "Method not allowed"})
 
-                return JSONResponse(status_code=response.status_code, content=response.json())
+            return JSONResponse(status_code=response.status_code, content=response.json())
 
         except Exception as e:
             logger.error(f"Error handling forwarding request: {e}")
@@ -114,15 +113,22 @@ class API:
             # Prepare the request data for llama-server OpenAI API
 
             url = f"http://localhost:{server.port}/v1/chat/completions"
-            async with httpx.AsyncClient() as client:
-                response = await client.post(url, json=request, timeout=60.0)
-                if response.status_code != 200:
-                    raise Exception(f"llama-server returned {response.status_code}: {response.text}")
+            logger.debug(f"Forwarding request to {url}")
+            response = await asyncio.to_thread(requests.post, url, json=request, timeout=self.config.server_pool.request_timeout)
+            logger.debug(f"Received response with status {response.status_code}")
+            if response.status_code != 200:
+                logger.error(f"llama-server returned {response.status_code}: {response.text}")
+                raise Exception(f"llama-server returned {response.status_code}: {response.text}")
 
+            try:
                 result = response.json()
+                logger.debug(f"Parsed response json successfully")
                 return result
+            except Exception as json_e:
+                logger.error(f"Failed to parse response as json: {response.text}")
+                raise Exception(f"Invalid json response from llama-server: {str(json_e)}")
         except Exception as e:
-            logger.debug(f"Generation failed: {e}")
+            logger.error(f"Generation failed: {type(e).__name__}: {e}")
             raise HTTPException(status_code=500, detail=f"Model generation failed: {str(e)}")
 
     async def chat_completions(self, request: dict) -> dict:
@@ -166,6 +172,7 @@ class API:
         except HTTPException:
             raise
         except Exception as e:
+            logger.error(f"Unexpected error in chat_completions: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
     async def health(self):

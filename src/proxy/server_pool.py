@@ -1,6 +1,7 @@
 import time
 import asyncio
 import subprocess
+import requests
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass
 from .config import ServerPoolConfig
@@ -104,7 +105,6 @@ class ServerPool:
                 cmd.extend(['--n-gpu-layers', str(self.config.gpu_layers)])
             process = subprocess.Popen(
                 cmd,
-                # , '--api'
                 # stdout=subprocess.PIPE,
                 # stderr=subprocess.PIPE
             )
@@ -112,19 +112,17 @@ class ServerPool:
             server.model = model_identifier
 
             # Wait for the server to be ready
-            import httpx
             for _ in range(120):  # Wait up to 120 seconds for model download
                 await asyncio.sleep(1)
                 if process.poll() is not None:
                     # Process has exited
                     break
                 try:
-                    async with httpx.AsyncClient() as client:
-                        response = await client.get(f"http://127.0.0.1:{server.port}/health", timeout=1.0)
-                        if response.status_code == 200:
-                            server.is_healthy = True
-                            logger.info(f"Started llama-server for model {model_identifier} on port {server.port}")
-                            return True
+                    response = await asyncio.to_thread(requests.get, f"http://127.0.0.1:{server.port}/health", timeout=1.0)
+                    if response.status_code == 200:
+                        server.is_healthy = True
+                        logger.info(f"Started llama-server for model {model_identifier} on port {server.port}")
+                        return True
                 except:
                     continue
 
@@ -157,7 +155,6 @@ class ServerPool:
         Check the health of all servers.
         Marks unhealthy servers and attempts to recover them.
         """
-        import httpx
         for server in self.servers:
             if server.process is not None:
                 try:
@@ -166,12 +163,11 @@ class ServerPool:
                         raise Exception("Process has terminated")
 
                     # Ping the health endpoint
-                    async with httpx.AsyncClient() as client:
-                        response = await client.get(f"http://localhost:{server.port}/health", timeout=5.0)
-                        if response.status_code == 200:
-                            server.is_healthy = True
-                        else:
-                            raise Exception(f"Health check returned {response.status_code}")
+                    response = await asyncio.to_thread(requests.get, f"http://localhost:{server.port}/health", timeout=5.0)
+                    if response.status_code == 200:
+                        server.is_healthy = True
+                    else:
+                        raise Exception(f"Health check returned {response.status_code}")
                 except Exception as e:
                     logger.warning(f"Server {server.id} health check failed: {e}")
                     server.is_healthy = False

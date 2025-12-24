@@ -3,7 +3,8 @@
     "size": 2,
     "host": "localhost",
     "port_start": 11601,
-    "gpu_layers": 99
+    "gpu_layers": 99,
+    "request_timeout": 600
   },
   "server": {
     "host": "0.0.0.0",

@@ -12,11 +12,13 @@ class ServerPoolConfig(BaseModel):
         host: Host for the servers.
         port_start: Starting port number for servers.
         gpu_layers: Number of layers to offload to GPU (0 = CPU only).
+        request_timeout: Timeout for requests to server pool in seconds.
     """
     size: int = Field(..., gt=0, description="Number of servers in the pool")
     host: str = Field("localhost", description="Host for the servers")
     port_start: int = Field(8001, description="Starting port number for servers")
     gpu_layers: int = Field(0, ge=0, description="Number of layers to offload to GPU (0 = CPU only)")
+    request_timeout: int = Field(300, description="Timeout for requests to server pool in seconds")
 
 
 class ServerConfig(BaseModel):
