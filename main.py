@@ -11,7 +11,7 @@ if __name__ == "__main__":
         api = API(config)
         logger.info("Starting Llama Smart Proxy...")
         # Start the uvicorn server
-        uvicorn.run(api.app, host="0.0.0.0", port=8000)
+        uvicorn.run(api.app, host=config.server.host, port=config.server.port)
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
         raise

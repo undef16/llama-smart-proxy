@@ -25,6 +25,15 @@ class E2ESimulation:
         if self.config.simulation is None:
             raise ValueError("Simulation configuration is required for this script")
         self.sim = self.config.simulation
+        if self.sim.enable_remote:
+            host = self.sim.host
+            if host.startswith('http://'):
+                host = host[7:]
+            elif host.startswith('https://'):
+                host = host[8:]
+            self.server_url = f"http://{host}:{self.sim.port}"
+        else:
+            self.server_url = self.sim.server_url or f"http://localhost:{self.config.server.port}"
 
     def get_base_request_data(self):
         """Get the base request data for chat completion."""
@@ -36,7 +45,7 @@ class E2ESimulation:
     def send_request(self, endpoint, data):
         """Send a POST request to the specified endpoint with the given data."""
         return requests.post(
-            self.sim.server_url + endpoint,
+            self.server_url + endpoint,
             json=data,
             timeout=self.sim.request_timeout
         )
@@ -55,14 +64,16 @@ class E2ESimulation:
 
     def run(self):
         """Main simulation function."""
-        
+
         result = 1
         print("Starting Llama Smart Proxy E2E Simulation...")
 
-        # Start the proxy server
-        server_process = self.start_server()
-        if not server_process:
-            return result
+        server_process = None
+        if not self.sim.enable_remote:
+            # Start the proxy server
+            server_process = self.start_server()
+            if not server_process:
+                return result
 
         try:
             # Run all checks
@@ -74,13 +85,14 @@ class E2ESimulation:
             result = 0
         except requests.RequestException as e:
             print(f"Request failed: {e}")
-            
+
         except KeyboardInterrupt:
             print("\nSimulation interrupted by user")
-            
+
         finally:
             # Clean up: terminate the server
-            self.stop_server(server_process)
+            if server_process:
+                self.stop_server(server_process)
 
             # Server output is printed directly
 
@@ -202,7 +214,7 @@ class E2ESimulation:
             )
             # Wait for server to be ready
             print("Waiting for server to start...")
-            check_response = self.wait_for_server(self.sim.server_url + self.sim.health_endpoint, timeout=self.sim.wait_timeout)
+            check_response = self.wait_for_server(self.server_url + self.sim.health_endpoint, timeout=self.sim.wait_timeout)
             if not check_response:
                 print("Server failed to start within timeout")
                 return None

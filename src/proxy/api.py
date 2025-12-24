@@ -97,6 +97,8 @@ class API:
         backend llama.cpp server without any processing or modification.
         """
         # Custom routes with processing
+        self.app.post("/v1/chat/completions")(self.chat_completions)
+        self.app.post("/v1/completions")(self.chat_completions)
         self.app.post("/chat/completions")(self.chat_completions)
         self.app.post("/completions")(self.chat_completions)
         self.app.get("/health")(self.health)

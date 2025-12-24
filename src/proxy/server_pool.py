@@ -38,6 +38,16 @@ class ServerPool:
             port = self.config.port_start + i
             self.servers.append(ServerInstance(id=i, port=port))
 
+    @staticmethod
+    def _is_cuda_available() -> bool:
+        """Check if CUDA is available on the system."""
+        try:
+            result = subprocess.run(['nvidia-smi'], capture_output=True)
+            logger.info(f"Is cuda avaialble: {result.returncode == 0}")    
+            return result.returncode == 0
+        except FileNotFoundError:
+            return False
+
     async def get_server_for_model(self, model_identifier: str) -> Optional[ServerInstance]:
         """
         Get an available server for the given model.
@@ -89,8 +99,11 @@ class ServerPool:
         logger.debug(f"Starting llama-server for model {model_identifier} on port {server.port}")
         try:
             # Start the llama-server subprocess
+            cmd = ['llama-server', '-hf', model_identifier, '--port', str(server.port), '--host', '127.0.0.1'] #, '--log-verbosity', '0'
+            if self._is_cuda_available() and self.config.gpu_layers > 0:
+                cmd.extend(['--n-gpu-layers', str(self.config.gpu_layers)])
             process = subprocess.Popen(
-                ['llama-server', '-hf', model_identifier, '--port', str(server.port), '--host', '127.0.0.1', '--log-verbosity', '0'],
+                cmd,
                 # , '--api'
                 # stdout=subprocess.PIPE,
                 # stderr=subprocess.PIPE
@@ -100,8 +113,11 @@ class ServerPool:
 
             # Wait for the server to be ready
             import httpx
-            for _ in range(30):  # Wait up to 30 seconds
+            for _ in range(120):  # Wait up to 120 seconds for model download
                 await asyncio.sleep(1)
+                if process.poll() is not None:
+                    # Process has exited
+                    break
                 try:
                     async with httpx.AsyncClient() as client:
                         response = await client.get(f"http://127.0.0.1:{server.port}/health", timeout=1.0)
@@ -112,12 +128,27 @@ class ServerPool:
                 except:
                     continue
 
-            logger.error(f"llama-server did not become ready for model {model_identifier} on port {server.port}")
+            # If not ready, check if process is still running and get stderr
+            if process.poll() is None:
+                # Process is still running, terminate it
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+
+            # Read stderr
+            stderr_output = process.stderr.read().decode('utf-8', errors='ignore') if process.stderr else ""
+            logger.error(f"llama-server did not become ready for model {model_identifier} on port {server.port}. Stderr: {stderr_output}")
             server.is_healthy = False
             return False
 
         except Exception as e:
             logger.error(f"Failed to start llama-server for model {model_identifier} on port {server.port}: {e}")
+            if server.process and server.process.stderr:
+                stderr_output = server.process.stderr.read().decode('utf-8', errors='ignore')
+                logger.error(f"llama-server stderr: {stderr_output}")
             server.is_healthy = False
             return False
 

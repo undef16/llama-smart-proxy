@@ -2,7 +2,12 @@
   "server_pool": {
     "size": 2,
     "host": "localhost",
-    "port_start": 11601
+    "port_start": 11601,
+    "gpu_layers": 99
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 11555
   },
   "models": {
     "Qwen3-0.6B": {
@@ -12,7 +17,9 @@
   },
   "agents": [],
   "simulation": {
-    "server_url": "http://localhost:8000",
+    "enable_remote": false,
+    "host": "http://192.168.1.195",
+    "port": 11555,
     "health_endpoint": "/health",
     "chat_endpoint": "/chat/completions",
     "wait_timeout": 30,
