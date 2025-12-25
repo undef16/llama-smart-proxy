@@ -1,9 +1,10 @@
 """
 Unit tests for model_resolver.py module.
 """
+
 import pytest
 
-from src.proxy.model_resolver import ModelResolver
+from src.frameworks_drivers.model_resolver import ModelResolver
 
 
 class TestModelResolver:

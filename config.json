@@ -1,10 +1,21 @@
 {
+  "backend": "llama.cpp",
   "server_pool": {
     "size": 2,
     "host": "localhost",
     "port_start": 11601,
     "gpu_layers": 99,
-    "request_timeout": 600
+    "request_timeout": 600,
+    "health_timeout": 5.0
+  },
+  "ollama": {
+    "host": "localhost",
+    "port": 11434,
+    "timeout": 300.0,
+    "models": [
+      "qwen2.5-coder:1.5b",
+      "Qwen3-0.6B"
+    ]
   },
   "server": {
     "host": "0.0.0.0",

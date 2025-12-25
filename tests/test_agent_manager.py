@@ -1,12 +1,11 @@
 """
 Unit tests for agent_manager.py module.
 """
+
 import json
-import pytest
 from unittest.mock import Mock, patch
 
-from src.proxy.agent_manager import AgentManager
-from src.proxy.types import AgentConfig, Message
+from src.frameworks_drivers.agent_manager import AgentManager
 
 
 class TestAgentManager:
@@ -38,7 +37,7 @@ class TestAgentManager:
         # Check agent configs
         assert "test_agent" in manager.agent_configs
         assert "another_agent" in manager.agent_configs
-        assert manager.agent_configs["test_agent"].enabled is True
+        assert manager.agent_configs["test_agent"]["enabled"] is True
 
     def test_discover_disabled_agents(self, temp_dir, mock_agent_config):
         """Test that disabled agents are not loaded."""
@@ -52,13 +51,14 @@ class TestAgentManager:
         config_path = agent_dir / "config.json"
         disabled_config = mock_agent_config.model_dump()
         disabled_config["enabled"] = False
-        with open(config_path, 'w') as f:
+        with open(config_path, "w") as f:
             json.dump(disabled_config, f, indent=2)
 
         # Create agent.py
         agent_py = agent_dir / "agent.py"
-        with open(agent_py, 'w') as f:
-            f.write("""
+        with open(agent_py, "w") as f:
+            f.write(
+                """
 class DisabledAgent:
     def __init__(self):
         self.name = "disabled_agent"
@@ -68,7 +68,8 @@ class DisabledAgent:
 
     def process_response(self, response):
         return response
-""")
+""",
+            )
 
         manager = AgentManager(str(plugins_dir))
         assert "disabled_agent" not in manager.agents
@@ -128,7 +129,7 @@ class DisabledAgent:
         manager = AgentManager(mock_plugins_dir)
         chain = manager.build_agent_chain(["test_agent", "another_agent"])
         assert len(chain) == 2
-        assert hasattr(chain[0], 'process_request')  # Should be agent instances
+        assert hasattr(chain[0], "process_request")  # Should be agent instances
 
     def test_build_agent_chain_unknown_agents(self, mock_plugins_dir):
         """Test building agent chain with unknown agents."""
@@ -220,8 +221,8 @@ class DisabledAgent:
         available = manager.get_available_agents()
         assert available == []
 
-    @patch('importlib.util.spec_from_file_location')
-    @patch('importlib.util.module_from_spec')
+    @patch("importlib.util.spec_from_file_location")
+    @patch("importlib.util.module_from_spec")
     def test_agent_loading_error_handling(self, mock_module_from_spec, mock_spec_from_file, temp_dir):
         """Test error handling during agent loading."""
         # Create a plugins directory with a problematic agent
@@ -232,12 +233,12 @@ class DisabledAgent:
 
         # Create config
         config_path = agent_dir / "config.json"
-        with open(config_path, 'w') as f:
+        with open(config_path, "w") as f:
             f.write('{"description": "test", "enabled": true, "end_point": "/chat/completions"}')
 
         # Create agent.py that will cause import error
         agent_py = agent_dir / "agent.py"
-        with open(agent_py, 'w') as f:
+        with open(agent_py, "w") as f:
             f.write("raise ImportError('Test import error')")
 
         # Mock spec to return None (simulating import failure)

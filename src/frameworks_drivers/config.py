@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
-from typing import Optional
-from .common_imports import BaseModel, Field, Dict, List
+from typing import Dict, List
+
+from pydantic import BaseModel, Field
 
 
 class ServerPoolConfig(BaseModel):
@@ -14,6 +15,7 @@ class ServerPoolConfig(BaseModel):
         gpu_layers: Number of layers to offload to GPU (0 = CPU only).
         request_timeout: Timeout for requests to server pool in seconds.
     """
+
     size: int = Field(..., gt=0, description="Number of servers in the pool")
     host: str = Field("localhost", description="Host for the servers")
     port_start: int = Field(8001, description="Starting port number for servers")
@@ -28,6 +30,7 @@ class ServerConfig(BaseModel):
         host: Host for the main server.
         port: Port for the main server.
     """
+
     host: str = Field("0.0.0.0", description="Host for the main server")
     port: int = Field(8000, description="Port for the main server")
 
@@ -39,6 +42,7 @@ class ModelConfig(BaseModel):
         repo: Repository for the model.
         variant: Model variant.
     """
+
     repo: str = Field(..., description="Repository for the model")
     variant: str = Field(..., description="Model variant")
 
@@ -50,8 +54,23 @@ class MessageConfig(BaseModel):
         role: Role of the message sender.
         content: Content of the message.
     """
+
     role: str = Field(..., description="Role of the message sender")
     content: str = Field(..., description="Content of the message")
+
+
+class OllamaConfig(BaseModel):
+    """Configuration for Ollama backend.
+
+    Attributes:
+        host: Host for the Ollama server.
+        port: Port for the Ollama server.
+        models: List of available models.
+    """
+
+    host: str = Field("localhost", description="Host for the Ollama server")
+    port: int = Field(11434, description="Port for the Ollama server")
+    models: List[str] = Field(default_factory=list, description="List of available models")
 
 
 class SimulationConfig(BaseModel):
@@ -70,10 +89,11 @@ class SimulationConfig(BaseModel):
         model: Model to use for simulation.
         messages: Messages for the simulation.
     """
+
     enable_remote: bool = Field(False, description="Whether to use a remote server instead of starting local")
     host: str = Field("localhost", description="Host for the remote server")
     port: int = Field(8000, description="Port for the remote server")
-    server_url: Optional[str] = Field(None, description="URL of the server (deprecated, use host/port instead)")
+    server_url: str | None = Field(None, description="URL of the server (deprecated, use host/port instead)")
     health_endpoint: str = Field(..., description="Health check endpoint")
     chat_endpoint: str = Field(..., description="Chat completions endpoint")
     wait_timeout: int = Field(30, description="Timeout for waiting for server")
@@ -87,19 +107,22 @@ class Config(BaseModel):
     """Main configuration class.
 
     Attributes:
+        backend: Backend to use ('llama.cpp' or 'ollama').
         server_pool: Configuration for the server pool.
+        ollama: Configuration for Ollama backend.
         server: Configuration for the main server.
         models: Mapping of model names to configurations.
         agents: List of available agent plugins.
         simulation: Simulation configuration.
     """
+
+    backend: str = Field(..., description="Backend to use ('llama.cpp' or 'ollama')")
     server_pool: ServerPoolConfig
+    ollama: OllamaConfig | None = Field(default=None, description="Configuration for Ollama backend")
     server: ServerConfig
     models: Dict[str, ModelConfig] = Field(default_factory=dict, description="Mapping of model names to configurations")
     agents: List[str] = Field(default_factory=list, description="List of available agent plugins")
-    simulation: Optional[SimulationConfig] = Field(default=None, description="Simulation configuration")
-
-
+    simulation: SimulationConfig | None = Field(default=None, description="Simulation configuration")
 
     @classmethod
     def load(cls, config_path: str = "config.json") -> "Config":
@@ -108,7 +131,7 @@ class Config(BaseModel):
         if not path.exists():
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-        with open(path, 'r') as f:
+        with open(path) as f:
             data = json.load(f)
 
         return cls(**data)
