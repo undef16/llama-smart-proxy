@@ -126,6 +126,7 @@ class ServerPool:
                 model_identifier,
                 "--port",
                 str(server.port),
+                "--log-disable",
                 "--host",
                 "127.0.0.1",
             ]  # , '--log-verbosity', '0'

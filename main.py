@@ -1,3 +1,4 @@
+import os
 import uvicorn
 
 from src.frameworks_drivers.agent_manager import AgentManager
@@ -18,6 +19,10 @@ if __name__ == "__main__":
 
     try:
         config = Config.load()
+
+        # Override backend if set in environment
+        if "LLM_PROXY_BACKEND" in os.environ:
+            config.backend = os.environ["LLM_PROXY_BACKEND"]
 
         # Instantiate dependencies
         model_repository = ModelRepository()

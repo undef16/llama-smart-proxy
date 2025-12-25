@@ -1,0 +1,32 @@
+{
+  "enable_remote": false,
+  "host": "http://192.168.1.195",
+  "port": 11555,
+  "health_endpoint": "/health",
+  "chat_endpoint": "/chat/completions",
+  "wait_timeout": 30,
+  "request_timeout": 300,
+  "terminate_timeout": 10,
+  "max_tokens": 2048,
+  "model": "Qwen2.5-0.5B",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Tell me a joke about a python programmer."
+    }
+  ],
+  "ollama_models": [
+    "qwen2.5-coder:1.5b",
+    "Qwen3-0.6B"
+  ],
+  "llama_cpp_models": {
+    "Qwen2.5-0.5B": {
+      "repo": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+      "variant": "Q4_K_M"
+    },
+    "Qwen3-0.6B": {
+      "repo": "unsloth/Qwen3-0.6B-GGUF",
+      "variant": "Qwen3-0.6B.Q4_K_M.gguf"
+    }
+  }
+}

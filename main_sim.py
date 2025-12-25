@@ -27,12 +27,22 @@ class E2ESimulation:
 
     def __init__(self):
 
-        # Load original configuration data
+        # Load base configuration data
         with open("config.json") as f:
-            self.original_config_data = json.load(f)
+            base_config = json.load(f)
+
+        # Load simulation configuration data
+        with open("config_sim.json") as f:
+            sim_config = json.load(f)
+
+        # Merge configurations
+        self.original_config_data = {**base_config, "simulation": sim_config}
 
         # Load configuration
-        self.config = Config.load("config.json")
+        self.config = Config(**self.original_config_data)
+        if self.config.simulation is None:
+            raise ValueError("Simulation configuration is required for this script")
+        self.sim = self.config.simulation
         if self.config.simulation is None:
             raise ValueError("Simulation configuration is required for this script")
         self.sim = self.config.simulation
@@ -138,7 +148,7 @@ class E2ESimulation:
         print("Testing parallel requests...")
 
         request_data = self.get_base_request_data()
-        request_data["max_tokens"] = 2048
+        request_data["max_tokens"] = self.sim.max_tokens
 
         def send_request():
             try:
@@ -236,7 +246,6 @@ class E2ESimulation:
         return server_process
 
     def run(self):
-        # 
         backends = ["ollama", "llama.cpp"]
 
         overall_result = 0
@@ -246,14 +255,13 @@ class E2ESimulation:
             print(f"Testing backend: {backend}")
             print(f"{'='*50}")
 
-            # Modify config
+            # Set backend in environment for server
+            os.environ['LLM_PROXY_BACKEND'] = backend
+
+            # Modify config in memory
             config_data = self.original_config_data.copy()
             config_data["backend"] = backend
 
-            with open("config.json", "w") as f:
-                json.dump(config_data, f, indent=2)
-
-            # Reload config
             self.config = Config(**config_data)
 
             # Update checker factory config and recreate checker
@@ -263,10 +271,6 @@ class E2ESimulation:
             # Set the simulation model using the backend checker
             config_data["simulation"]["model"] = self.checker.get_simulation_model()
 
-            with open("config.json", "w") as f:
-                json.dump(config_data, f, indent=2)
-
-            # Reload config again
             self.config = Config(**config_data)
             self.sim = self.config.simulation
 
@@ -274,10 +278,6 @@ class E2ESimulation:
             result = self.run_single_simulation()
             if result != 0:
                 overall_result = result
-
-        # Restore original config
-        with open("config.json", "w") as f:
-            json.dump(self.original_config_data, f, indent=2)
 
         print("E2E simulation completed for all backends!")
         return overall_result

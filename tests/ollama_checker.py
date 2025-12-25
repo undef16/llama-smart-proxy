@@ -47,7 +47,7 @@ class OllamaChecker(BackendCheckerProtocol):
 
     def get_simulation_model(self) -> str:
         """Get the model to use for simulation."""
-        ollama_models = self.config.get("ollama", {}).get("models", [])
+        ollama_models = self.config.get("simulation", {}).get("ollama_models", [])
         if ollama_models:
             return ollama_models[0]
         raise ValueError("No Ollama models configured")

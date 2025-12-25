@@ -35,12 +35,17 @@ class LlamaCppChecker(BackendCheckerProtocol):
 
     def get_simulation_model(self) -> str:
         """Get the model to use for simulation."""
-        models = self.config.get("models", {})
-        if models:
-            # Use the first model key, or a specific one if available
-            model_key = list(models.keys())[0]  # e.g., "Qwen3-0.6B"
-            # Construct the full model identifier
+        model_key = self.config.get("simulation", {}).get("model", "")
+        models = self.config.get("simulation", {}).get("llama_cpp_models", {})
+        if model_key and model_key in models:
+            # Use the specified model from simulation.model
             repo = models[model_key]["repo"]
-            # For now, hardcode the variant as Q4_K_M
-            return f"{repo}:Q4_K_M"
+            variant = models[model_key]["variant"]
+            return f"{repo}:{variant}"
+        elif models:
+            # Fallback: use the first available model
+            model_key = list(models.keys())[0]
+            repo = models[model_key]["repo"]
+            variant = models[model_key]["variant"]
+            return f"{repo}:{variant}"
         raise ValueError("No models configured for llama.cpp")

@@ -65,12 +65,12 @@ class OllamaConfig(BaseModel):
     Attributes:
         host: Host for the Ollama server.
         port: Port for the Ollama server.
-        models: List of available models.
+        timeout: Timeout for Ollama requests.
     """
 
     host: str = Field("localhost", description="Host for the Ollama server")
     port: int = Field(11434, description="Port for the Ollama server")
-    models: List[str] = Field(default_factory=list, description="List of available models")
+    timeout: float = Field(30.0, description="Timeout for Ollama requests")
 
 
 class SimulationConfig(BaseModel):
@@ -88,6 +88,8 @@ class SimulationConfig(BaseModel):
         terminate_timeout: Timeout for terminating server.
         model: Model to use for simulation.
         messages: Messages for the simulation.
+        ollama_models: List of Ollama models available for simulation.
+        llama_cpp_models: Mapping of model names to configurations for simulation.
     """
 
     enable_remote: bool = Field(False, description="Whether to use a remote server instead of starting local")
@@ -99,8 +101,11 @@ class SimulationConfig(BaseModel):
     wait_timeout: int = Field(30, description="Timeout for waiting for server")
     request_timeout: int = Field(300, description="Timeout for requests")
     terminate_timeout: int = Field(10, description="Timeout for terminating server")
+    max_tokens: int = Field(2048, description="Maximum tokens for simulation requests")
     model: str = Field(..., description="Model to use for simulation")
     messages: List[MessageConfig] = Field(default_factory=list, description="Messages for the simulation")
+    ollama_models: List[str] = Field(default_factory=list, description="List of Ollama models available for simulation")
+    llama_cpp_models: Dict[str, ModelConfig] = Field(default_factory=dict, description="Mapping of model names to configurations for simulation")
 
 
 class Config(BaseModel):
@@ -111,7 +116,7 @@ class Config(BaseModel):
         server_pool: Configuration for the server pool.
         ollama: Configuration for Ollama backend.
         server: Configuration for the main server.
-        models: Mapping of model names to configurations.
+        models: Mapping of model names to configurations (deprecated, use simulation.llama_cpp_models).
         agents: List of available agent plugins.
         simulation: Simulation configuration.
     """
@@ -120,9 +125,16 @@ class Config(BaseModel):
     server_pool: ServerPoolConfig
     ollama: OllamaConfig | None = Field(default=None, description="Configuration for Ollama backend")
     server: ServerConfig
-    models: Dict[str, ModelConfig] = Field(default_factory=dict, description="Mapping of model names to configurations")
+    models: Dict[str, ModelConfig] = Field(default_factory=dict, description="Mapping of model names to configurations (deprecated, use simulation.llama_cpp_models)")
     agents: List[str] = Field(default_factory=list, description="List of available agent plugins")
     simulation: SimulationConfig | None = Field(default=None, description="Simulation configuration")
+
+    @property
+    def effective_models(self) -> Dict[str, ModelConfig]:
+        """Get the effective models configuration, preferring simulation.llama_cpp_models if available."""
+        if self.simulation and self.simulation.llama_cpp_models:
+            return self.simulation.llama_cpp_models
+        return self.models
 
     @classmethod
     def load(cls, config_path: str = "config.json") -> "Config":

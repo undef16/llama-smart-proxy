@@ -11,38 +11,11 @@
   "ollama": {
     "host": "localhost",
     "port": 11434,
-    "timeout": 300.0,
-    "models": [
-      "qwen2.5-coder:1.5b",
-      "Qwen3-0.6B"
-    ]
+    "timeout": 300.0
   },
   "server": {
     "host": "0.0.0.0",
     "port": 11555
   },
-  "models": {
-    "Qwen3-0.6B": {
-      "repo": "unsloth/Qwen3-0.6B-GGUF",
-      "variant": "Qwen3-0.6B.Q4_K_M.gguf"
-    }
-  },
-  "agents": [],
-  "simulation": {
-    "enable_remote": false,
-    "host": "http://192.168.1.195",
-    "port": 11555,
-    "health_endpoint": "/health",
-    "chat_endpoint": "/chat/completions",
-    "wait_timeout": 30,
-    "request_timeout": 300,
-    "terminate_timeout": 10,
-    "model": "unsloth/Qwen3-0.6B-GGUF:Q4_K_M",
-    "messages": [
-      {
-        "role": "user",
-        "content": "Tell me a joke about a python programmer."
-      }
-    ]
-  }
+  "agents": []
 }

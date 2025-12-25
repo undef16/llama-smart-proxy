@@ -58,16 +58,16 @@ class TestConfig:
         assert config.server_pool.size == 3
         assert config.server_pool.host == "127.0.0.1"
         assert config.server_pool.port_start == 9000
-        assert len(config.models) == 2
-        assert "test-model" in config.models
-        assert config.models["test-model"].repo == "test/repo"
+        assert len(config.effective_models) == 2
+        assert "test-model" in config.effective_models
+        assert config.effective_models["test-model"].repo == "test/repo"
         assert config.agents == ["test-agent", "another-agent"]
 
     def test_minimal_config(self, minimal_config_data):
         """Test config with minimal required fields."""
         config = Config(**minimal_config_data)
         assert config.server_pool.size == 1
-        assert config.models == {}
+        assert config.effective_models == {}
         assert config.agents == []
 
     def test_invalid_config(self, invalid_config_data):
@@ -86,7 +86,7 @@ class TestLoadConfig:
         assert config.server_pool.size == sample_config_data["server_pool"]["size"]
         assert config.server_pool.host == sample_config_data["server_pool"]["host"]
         assert config.server_pool.port_start == sample_config_data["server_pool"]["port_start"]
-        assert len(config.models) == len(sample_config_data["models"])
+        assert len(config.effective_models) == len(sample_config_data["models"])
         assert config.agents == sample_config_data["agents"]
 
     def test_load_config_with_defaults(self, temp_dir, minimal_config_data):
@@ -100,7 +100,7 @@ class TestLoadConfig:
         assert config.server_pool.size == 1
         assert config.server_pool.host == "localhost"  # default
         assert config.server_pool.port_start == 8001  # default
-        assert config.models == {}
+        assert config.effective_models == {}
         assert config.agents == []
 
     def test_load_nonexistent_file(self):
