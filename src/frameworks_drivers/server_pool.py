@@ -1,12 +1,12 @@
-import time
 import asyncio
 import subprocess
-import requests
-from typing import Optional, Dict, List, Any
+import time
 from dataclasses import dataclass
-from .config import ServerPoolConfig
-from .model_resolver import ModelResolver
-from .common_imports import Logger
+from typing import Any
+
+from src.frameworks_drivers.config import ServerPoolConfig
+from src.shared.health_checker import HealthChecker
+from src.shared.logger import Logger
 
 logger = Logger.get(__name__)
 
@@ -14,10 +14,11 @@ logger = Logger.get(__name__)
 @dataclass
 class ServerInstance:
     """Represents a single llama-server subprocess instance."""
+
     id: int
-    process: Optional[subprocess.Popen] = None
+    process: subprocess.Popen | None = None
     port: int = 0
-    model: Optional[str] = None  # The model identifier loaded
+    model: str | None = None  # The model identifier loaded
     last_used: float = 0.0
     is_healthy: bool = True
 
@@ -30,7 +31,7 @@ class ServerPool:
 
     def __init__(self, config: ServerPoolConfig):
         self.config = config
-        self.servers: List[ServerInstance] = []
+        self.servers: list[ServerInstance] = []
         self._initialize_servers()
 
     def _initialize_servers(self) -> None:
@@ -43,13 +44,24 @@ class ServerPool:
     def _is_cuda_available() -> bool:
         """Check if CUDA is available on the system."""
         try:
-            result = subprocess.run(['nvidia-smi'], capture_output=True)
-            logger.info(f"Is cuda avaialble: {result.returncode == 0}")    
+            result = subprocess.run(["nvidia-smi"], check=False, capture_output=True)
+            logger.info(f"Is cuda avaialble: {result.returncode == 0}")
             return result.returncode == 0
         except FileNotFoundError:
             return False
 
-    async def get_server_for_model(self, model_identifier: str) -> Optional[ServerInstance]:
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen | None, timeout: int) -> None:
+        """Terminate a subprocess with a timeout, killing if necessary."""
+        if process is not None:
+            process.terminate()
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+    async def get_server_for_model(self, model_identifier: str) -> ServerInstance | None:
         """
         Get an available server for the given model.
         Prefers servers already loaded with the model, then idle servers.
@@ -97,12 +109,28 @@ class ServerPool:
         Returns:
             True if successful, False otherwise.
         """
-        logger.debug(f"Starting llama-server for model {model_identifier} on port {server.port}")
+        logger.info(f"_load_model_into_server called for server {server.id} with model {model_identifier}, current process: {server.process is not None}, healthy: {server.is_healthy}")
         try:
+            # Terminate any existing process
+            if server.process is not None:
+                logger.warning(f"Terminating existing process for server {server.id}")
+                self._terminate_process(server.process, 5)
+                server.process = None
+                logger.info(f"Existing process terminated and cleaned up for server {server.id}")
+
+            logger.info(f"Starting llama-server subprocess for model {model_identifier} on port {server.port}")
             # Start the llama-server subprocess
-            cmd = ['llama-server', '-hf', model_identifier, '--port', str(server.port), '--host', '127.0.0.1'] #, '--log-verbosity', '0'
+            cmd = [
+                "llama-server",
+                "-hf",
+                model_identifier,
+                "--port",
+                str(server.port),
+                "--host",
+                "127.0.0.1",
+            ]  # , '--log-verbosity', '0'
             if self._is_cuda_available() and self.config.gpu_layers > 0:
-                cmd.extend(['--n-gpu-layers', str(self.config.gpu_layers)])
+                cmd.extend(["--n-gpu-layers", str(self.config.gpu_layers)])
             process = subprocess.Popen(
                 cmd,
                 # stdout=subprocess.PIPE,
@@ -110,42 +138,43 @@ class ServerPool:
             )
             server.process = process
             server.model = model_identifier
+            logger.info(f"Started subprocess for model {model_identifier} on port {server.port}")
 
             # Wait for the server to be ready
-            for _ in range(120):  # Wait up to 120 seconds for model download
+            for attempt in range(120):  # Wait up to 120 seconds for model download
                 await asyncio.sleep(1)
-                if process.poll() is not None:
-                    # Process has exited
+                if not HealthChecker.check_process_running(process):
+                    logger.warning(f"Process exited during wait on attempt {attempt}")
                     break
                 try:
-                    response = await asyncio.to_thread(requests.get, f"http://127.0.0.1:{server.port}/health", timeout=1.0)
-                    if response.status_code == 200:
+                    if await HealthChecker.check_http_endpoint("127.0.0.1", server.port, "/health", 1.0):
                         server.is_healthy = True
-                        logger.info(f"Started llama-server for model {model_identifier} on port {server.port}")
+                        logger.info(f"Successfully loaded model {model_identifier} on server {server.id}, port {server.port}")
                         return True
-                except:
+                except Exception as e:
+                    logger.debug(f"Health check failed on attempt {attempt}: {e}")
                     continue
 
             # If not ready, check if process is still running and get stderr
             if process.poll() is None:
                 # Process is still running, terminate it
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+                logger.warning(f"Terminating process after failed health checks for server {server.id}")
+                self._terminate_process(process, 5)
+                logger.info(f"Failed process terminated for server {server.id}")
 
             # Read stderr
-            stderr_output = process.stderr.read().decode('utf-8', errors='ignore') if process.stderr else ""
-            logger.error(f"llama-server did not become ready for model {model_identifier} on port {server.port}. Stderr: {stderr_output}")
+            stderr_output = process.stderr.read().decode("utf-8", errors="ignore") if process.stderr else ""
+            logger.error(
+                f"llama-server did not become ready for model {model_identifier} on port {server.port}. Stderr: {stderr_output}",
+            )
             server.is_healthy = False
+            logger.info(f"Failed to load model {model_identifier} on server {server.id}")
             return False
 
         except Exception as e:
             logger.error(f"Failed to start llama-server for model {model_identifier} on port {server.port}: {e}")
             if server.process and server.process.stderr:
-                stderr_output = server.process.stderr.read().decode('utf-8', errors='ignore')
+                stderr_output = server.process.stderr.read().decode("utf-8", errors="ignore")
                 logger.error(f"llama-server stderr: {stderr_output}")
             server.is_healthy = False
             return False
@@ -158,24 +187,29 @@ class ServerPool:
         for server in self.servers:
             if server.process is not None:
                 try:
-                    # Check if process is still running
-                    if server.process.poll() is not None:
-                        raise Exception("Process has terminated")
-
-                    # Ping the health endpoint
-                    response = await asyncio.to_thread(requests.get, f"http://localhost:{server.port}/health", timeout=5.0)
-                    if response.status_code == 200:
+                    # Perform comprehensive health check
+                    is_healthy = await HealthChecker.check_server_health(
+                        "localhost", server.port, server.process, "/health", 5.0
+                    )
+                    if is_healthy:
                         server.is_healthy = True
+                        logger.info(f"Health check passed for server {server.id}")
                     else:
-                        raise Exception(f"Health check returned {response.status_code}")
+                        raise Exception("Health check failed")
                 except Exception as e:
                     logger.warning(f"Server {server.id} health check failed: {e}")
                     server.is_healthy = False
                     # Attempt to restart the server
                     if server.model:
-                        await self._load_model_into_server(server, server.model)
+                        logger.info(f"Attempting recovery for server {server.id} with model {server.model}")
+                        success = await self._load_model_into_server(server, server.model)
+                        server.is_healthy = success
+                        if success:
+                            logger.info(f"Recovery successful for server {server.id}")
+                        else:
+                            logger.warning(f"Recovery failed for server {server.id}")
 
-    def get_pool_status(self) -> Dict[str, Any]:
+    def get_pool_status(self) -> dict[str, Any]:
         """
         Get the current status of the server pool.
 
@@ -187,7 +221,8 @@ class ServerPool:
             "healthy_servers": sum(1 for s in self.servers if s.is_healthy),
             "loaded_models": [
                 {"server_id": s.id, "model": s.model, "last_used": s.last_used}
-                for s in self.servers if s.model is not None
+                for s in self.servers
+                if s.model is not None
             ],
         }
         return result
@@ -196,11 +231,7 @@ class ServerPool:
         """Shutdown all servers in the pool."""
         for server in self.servers:
             if server.process is not None:
-                server.process.terminate()
-                try:
-                    server.process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    server.process.kill()
+                self._terminate_process(server.process, 10)
                 server.process = None
                 server.model = None
         logger.info("Server pool shutdown complete")

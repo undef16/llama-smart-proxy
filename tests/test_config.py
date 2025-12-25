@@ -1,11 +1,12 @@
 """
 Unit tests for config.py module.
 """
-import pytest
-import json
-from pathlib import Path
 
-from src.proxy.config import Config, ServerPoolConfig, ModelConfig
+import json
+
+import pytest
+
+from src.frameworks_drivers.config import Config, ModelConfig, ServerPoolConfig
 
 
 class TestServerPoolConfig:
@@ -13,25 +14,29 @@ class TestServerPoolConfig:
 
     def test_valid_config(self):
         """Test creating a valid ServerPoolConfig."""
-        config = ServerPoolConfig(size=3, host="127.0.0.1", port_start=9000)
+        config = ServerPoolConfig(size=3, host="127.0.0.1", port_start=9000, gpu_layers=0, request_timeout=300)
         assert config.size == 3
         assert config.host == "127.0.0.1"
         assert config.port_start == 9000
+        assert config.gpu_layers == 0
+        assert config.request_timeout == 300
 
     def test_default_values(self):
         """Test default values for ServerPoolConfig."""
-        config = ServerPoolConfig(size=2, host="localhost", port_start=8001)
+        config = ServerPoolConfig(size=2, host="localhost", port_start=8001, gpu_layers=1, request_timeout=60)
         assert config.size == 2
         assert config.host == "localhost"
         assert config.port_start == 8001
+        assert config.gpu_layers == 1
+        assert config.request_timeout == 60
 
     def test_invalid_size(self):
         """Test that size must be greater than 0."""
         with pytest.raises(ValueError):
-            ServerPoolConfig(size=0, host="localhost", port_start=8001)
+            ServerPoolConfig(size=0, host="localhost", port_start=8001, gpu_layers=0, request_timeout=300)
 
         with pytest.raises(ValueError):
-            ServerPoolConfig(size=-1, host="localhost", port_start=8001)
+            ServerPoolConfig(size=-1, host="localhost", port_start=8001, gpu_layers=0, request_timeout=300)
 
 
 class TestModelConfig:
@@ -87,7 +92,7 @@ class TestLoadConfig:
     def test_load_config_with_defaults(self, temp_dir, minimal_config_data):
         """Test loading config with default values."""
         config_path = temp_dir / "minimal_config.json"
-        with open(config_path, 'w') as f:
+        with open(config_path, "w") as f:
             json.dump(minimal_config_data, f, indent=2)
 
         config = Config.load(str(config_path))
@@ -106,7 +111,7 @@ class TestLoadConfig:
     def test_load_invalid_json(self, temp_dir):
         """Test loading invalid JSON raises JSON decode error."""
         config_path = temp_dir / "invalid.json"
-        with open(config_path, 'w') as f:
+        with open(config_path, "w") as f:
             f.write("invalid json content {")
 
         with pytest.raises(json.JSONDecodeError):
@@ -116,7 +121,7 @@ class TestLoadConfig:
         """Test loading JSON with invalid structure raises validation error."""
         config_path = temp_dir / "invalid_structure.json"
         invalid_data = {"invalid_field": "value"}
-        with open(config_path, 'w') as f:
+        with open(config_path, "w") as f:
             json.dump(invalid_data, f, indent=2)
 
         with pytest.raises(ValueError):

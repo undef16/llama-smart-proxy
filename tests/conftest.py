@@ -1,15 +1,20 @@
 """
 Test configuration and fixtures for llama smart proxy tests.
 """
+
 import json
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
-from typing import Dict, List
+
 import pytest
 
-from src.proxy.config import Config, ServerPoolConfig, ModelConfig
-from src.proxy.types import Message, AgentConfig
+
+def pytest_configure(config):
+    """Configure pytest warnings."""
+    config.addinivalue_line("filterwarnings", "ignore::PendingDeprecationWarning")
+
+from src.frameworks_drivers.config import Config
 
 
 @pytest.fixture
@@ -24,22 +29,14 @@ def temp_dir():
 def sample_config_data():
     """Sample configuration data for testing."""
     return {
-        "server_pool": {
-            "size": 3,
-            "host": "127.0.0.1",
-            "port_start": 9000
-        },
+        "backend": "llama.cpp",
+        "server": {"host": "0.0.0.0", "port": 8000},
+        "server_pool": {"size": 3, "host": "127.0.0.1", "port_start": 9000, "gpu_layers": 0, "request_timeout": 300},
         "models": {
-            "test-model": {
-                "repo": "test/repo",
-                "variant": "test-variant.gguf"
-            },
-            "another-model": {
-                "repo": "another/repo",
-                "variant": "Q4_K_M"
-            }
+            "test-model": {"repo": "test/repo", "variant": "test-variant.gguf"},
+            "another-model": {"repo": "another/repo", "variant": "Q4_K_M"},
         },
-        "agents": ["test-agent", "another-agent"]
+        "agents": ["test-agent", "another-agent"],
     }
 
 
@@ -47,7 +44,7 @@ def sample_config_data():
 def config_file(temp_dir, sample_config_data):
     """Create a temporary config file."""
     config_path = temp_dir / "config.json"
-    with open(config_path, 'w') as f:
+    with open(config_path, "w") as f:
         json.dump(sample_config_data, f, indent=2)
     return str(config_path)
 
@@ -62,11 +59,11 @@ def sample_config(sample_config_data):
 def minimal_config_data():
     """Minimal configuration data with defaults."""
     return {
-        "server_pool": {
-            "size": 1
-        },
+        "backend": "llama.cpp",
+        "server": {"host": "0.0.0.0", "port": 8000},
+        "server_pool": {"size": 1, "gpu_layers": 0, "request_timeout": 300},
         "models": {},
-        "agents": []
+        "agents": [],
     }
 
 
@@ -74,13 +71,11 @@ def minimal_config_data():
 def invalid_config_data():
     """Invalid configuration data for error testing."""
     return {
-        "server_pool": {
-            "size": 0,  # Invalid: must be > 0
-            "host": "localhost",
-            "port_start": 8001
-        },
+        "backend": "llama.cpp",
+        "server": {"host": "0.0.0.0", "port": 8000},
+        "server_pool": {"size": 0, "host": "localhost", "port_start": 8001, "gpu_layers": 0, "request_timeout": 300},  # Invalid: must be > 0
         "models": {},
-        "agents": []
+        "agents": [],
     }
 
 
@@ -109,11 +104,11 @@ def sample_chat_request():
         "messages": [
             {"role": "user", "content": "Hello, how are you?"},
             {"role": "assistant", "content": "I'm doing well, thank you!"},
-            {"role": "user", "content": "Can you help me with something?"}
+            {"role": "user", "content": "Can you help me with something?"},
         ],
         "temperature": 0.7,
         "max_tokens": 100,
-        "stream": False
+        "stream": False,
     }
 
 
@@ -125,30 +120,15 @@ def sample_chat_response():
         "created": 1234567890,
         "model": "test-model",
         "object": "chat.completion",
-        "choices": [
-            {"role": "assistant", "content": "I'd be happy to help you!"}
-        ],
-        "usage": {
-            "prompt_tokens": 15,
-            "completion_tokens": 10,
-            "total_tokens": 25
-        }
+        "choices": [{"role": "assistant", "content": "I'd be happy to help you!"}],
+        "usage": {"prompt_tokens": 15, "completion_tokens": 10, "total_tokens": 25},
     }
-
-
-@pytest.fixture
-def mock_agent_config():
-    """Mock agent configuration."""
-    return AgentConfig(
-        description="A test agent for testing purposes",
-        enabled=True,
-        end_point="/chat/completions"
-    )
 
 
 @pytest.fixture
 def mock_agent():
     """Mock agent for testing."""
+
     class MockAgent:
         def __init__(self, name: str):
             self.name = name
@@ -167,37 +147,48 @@ def mock_agent():
 
 
 @pytest.fixture
-def mock_plugins_dir(temp_dir, mock_agent_config, mock_agent):
+def mock_agent_config():
+    """Mock agent configuration for testing."""
+
+    class MockAgentConfig:
+        def __init__(self):
+            self.description = "test agent"
+            self.enabled = True
+            self.end_point = "/chat/completions"
+
+        def model_dump(self):
+            return {
+                "description": self.description,
+                "enabled": self.enabled,
+                "end_point": self.end_point,
+            }
+
+    return MockAgentConfig()
+
+
+@pytest.fixture
+def mock_plugins_dir(temp_dir):
     """Create a mock plugins directory with test agents."""
     plugins_dir = temp_dir / "plugins"
     plugins_dir.mkdir()
 
-    # Create test agent directories
-    agent1_dir = plugins_dir / "test_agent"
-    agent1_dir.mkdir()
-    
-    agent2_dir = plugins_dir / "another_agent"
-    agent2_dir.mkdir()
+    # Create test_agent
+    test_agent_dir = plugins_dir / "test_agent"
+    test_agent_dir.mkdir()
 
-    # Create config files for agents
-    agent1_config = agent1_dir / "config.json"
-    agent2_config = agent2_dir / "config.json"
+    # Create config.json for test_agent
+    config_path = test_agent_dir / "config.json"
+    with open(config_path, "w") as f:
+        json.dump({
+            "description": "Test agent",
+            "enabled": True,
+            "end_point": "/chat/completions"
+        }, f, indent=2)
 
-    with open(agent1_config, 'w') as f:
-        json.dump(mock_agent_config.model_dump(), f, indent=2)
-
-    # Different config for second agent
-    agent2_config_data = mock_agent_config.model_dump()
-    agent2_config_data["description"] = "Another test agent"
-    with open(agent2_config, 'w') as f:
-        json.dump(agent2_config_data, f, indent=2)
-
-    # Create agent.py files
-    agent1_py = agent1_dir / "agent.py"
-    agent2_py = agent2_dir / "agent.py"
-
-    # Create simple agent modules
-    agent1_content = """
+    # Create agent.py for test_agent
+    agent_py = test_agent_dir / "agent.py"
+    with open(agent_py, "w") as f:
+        f.write("""
 class TestAgent:
     def __init__(self):
         self.name = "test_agent"
@@ -207,9 +198,25 @@ class TestAgent:
 
     def process_response(self, response):
         return response
-"""
+""")
 
-    agent2_content = """
+    # Create another_agent
+    another_agent_dir = plugins_dir / "another_agent"
+    another_agent_dir.mkdir()
+
+    # Create config.json for another_agent
+    config_path = another_agent_dir / "config.json"
+    with open(config_path, "w") as f:
+        json.dump({
+            "description": "Another test agent",
+            "enabled": True,
+            "end_point": "/chat/completions"
+        }, f, indent=2)
+
+    # Create agent.py for another_agent
+    agent_py = another_agent_dir / "agent.py"
+    with open(agent_py, "w") as f:
+        f.write("""
 class AnotherAgent:
     def __init__(self):
         self.name = "another_agent"
@@ -219,63 +226,35 @@ class AnotherAgent:
 
     def process_response(self, response):
         return response
-"""
-
-    with open(agent1_py, 'w') as f:
-        f.write(agent1_content)
-
-    with open(agent2_py, 'w') as f:
-        f.write(agent2_content)
+""")
 
     return str(plugins_dir)
 
 
 @pytest.fixture
 def incomplete_plugins_dir(temp_dir):
-    """Create a plugins directory with incomplete agent setup."""
+    """Create a mock plugins directory with incomplete agent setup."""
     plugins_dir = temp_dir / "plugins"
     plugins_dir.mkdir()
 
-    # Create agent directory without config.json
-    agent_dir = plugins_dir / "incomplete_agent"
-    agent_dir.mkdir()
-    
-    # Create agent.py but no config.json
-    agent_py = agent_dir / "agent.py"
-    with open(agent_py, 'w') as f:
-        f.write("class IncompleteAgent:\n    pass")
+    # Create incomplete_agent with only config.json (missing agent.py)
+    incomplete_agent_dir = plugins_dir / "incomplete_agent"
+    incomplete_agent_dir.mkdir()
+
+    # Create config.json for incomplete_agent
+    config_path = incomplete_agent_dir / "config.json"
+    with open(config_path, "w") as f:
+        json.dump({
+            "description": "Incomplete agent",
+            "enabled": True,
+            "end_point": "/chat/completions"
+        }, f, indent=2)
+
+    # Don't create agent.py - this makes it incomplete
 
     return str(plugins_dir)
 
 
-@pytest.fixture
-def disabled_plugins_dir(temp_dir, mock_agent_config, mock_agent):
-    """Create a plugins directory with a disabled agent."""
-    plugins_dir = temp_dir / "plugins"
-    plugins_dir.mkdir()
 
-    agent_dir = plugins_dir / "disabled_agent"
-    agent_dir.mkdir()
 
-    # Create config with disabled agent
-    config_path = agent_dir / "config.json"
-    disabled_config = mock_agent_config.model_dump()
-    disabled_config["enabled"] = False
-    with open(config_path, 'w') as f:
-        json.dump(disabled_config, f, indent=2)
-
-    # Create agent.py
-    agent_py = agent_dir / "agent.py"
-    with open(agent_py, 'w') as f:
-        f.write("""
-class DisabledAgent:
-    def __init__(self):
-        self.name = "disabled_agent"
-
-    def process_request(self, request):
-        return request
-
-    def process_response(self, response):
-        return response
-""")
 
