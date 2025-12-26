@@ -4,9 +4,17 @@
     "size": 2,
     "host": "localhost",
     "port_start": 11601,
-    "gpu_layers": 99,
+    "gpu_layers": 999,
     "request_timeout": 600,
     "health_timeout": 5.0
+  },
+  "gpu": {
+    "enabled": true,
+    "enable_gpu_monitoring": true,
+    "allocation_strategy": "single-gpu-preferred",
+    "gpu_allocation_strategy": "single-gpu-preferred",
+    "monitoring_interval": 5.0,
+    "cpu_fallback": true
   },
   "ollama": {
     "host": "localhost",

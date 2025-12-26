@@ -1,26 +1,29 @@
+from __future__ import annotations
+
 import asyncio
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional, TYPE_CHECKING
 
-from src.frameworks_drivers.config import ServerPoolConfig
+from src.frameworks_drivers.config import ServerPoolConfig, Config
+from src.frameworks_drivers.gpu_resource_manager import GPUResourceManager
+from src.frameworks_drivers.server_instance import ServerInstance
+from src.frameworks_drivers.server_lifecycle_manager import ServerLifecycleManager
+from src.shared.errors import GPUAllocationError
 from src.shared.health_checker import HealthChecker
 from src.shared.logger import Logger
+from src.entities.performance_monitor import PerformanceMonitor
+
+# Import GPU-related modules
+if TYPE_CHECKING:
+    from src.entities.gpu_assignment import GPUAssignment
+    from src.frameworks_drivers.gpu_allocator import AdaptiveGPUAllocator
+    from src.frameworks_drivers.gpu_detector import GPUDetector
+    from src.frameworks_drivers.gpu_monitor import GPUMonitor
+    from src.frameworks_drivers.model_repository import ModelRepository
 
 logger = Logger.get(__name__)
-
-
-@dataclass
-class ServerInstance:
-    """Represents a single llama-server subprocess instance."""
-
-    id: int
-    process: subprocess.Popen | None = None
-    port: int = 0
-    model: str | None = None  # The model identifier loaded
-    last_used: float = 0.0
-    is_healthy: bool = True
 
 
 class ServerPool:
@@ -29,16 +32,36 @@ class ServerPool:
     model loading, and health monitoring.
     """
 
-    def __init__(self, config: ServerPoolConfig):
+    def __init__(self, config: ServerPoolConfig, model_repository: Optional[ModelRepository] = None, full_config: Optional[Config] = None):
         self.config = config
-        self.servers: list[ServerInstance] = []
-        self._initialize_servers()
+        self.model_repository = model_repository  # Store model repository reference
+        # Import GPU-related modules inside the initialization to handle import errors gracefully
+        gpu_detector = None
+        gpu_allocator = None
+        gpu_monitor = None
+        try:
+            from src.frameworks_drivers.gpu_detector import GPUDetector
+            from src.frameworks_drivers.gpu_allocator import AdaptiveGPUAllocator
+            from src.frameworks_drivers.gpu_monitor import GPUMonitor
+            gpu_detector = GPUDetector(full_config)
+            gpu_allocator = AdaptiveGPUAllocator()
+            gpu_monitor = GPUMonitor(full_config)
+        except ImportError as e:
+            # If GPU modules are not available, set them to None to fall back to CPU-only operation
+            logger.warning(f"GPU modules not available, falling back to CPU-only mode: {e}")
+        except Exception as e:
+            # Handle any other exceptions during GPU module initialization (like pynvml issues)
+            logger.warning(f"GPU modules initialization failed, falling back to CPU-only mode: {e}")
 
-    def _initialize_servers(self) -> None:
-        """Initialize the server pool with empty server instances."""
-        for i in range(self.config.size):
-            port = self.config.port_start + i
-            self.servers.append(ServerInstance(id=i, port=port))
+        # Create GPU resource manager
+        self.gpu_manager = GPUResourceManager(gpu_detector, gpu_allocator, model_repository) if gpu_detector and gpu_allocator else None
+        self.gpu_monitor = gpu_monitor
+
+        # Create server lifecycle manager
+        self.server_manager = ServerLifecycleManager(config, self.gpu_manager)
+
+        # Performance monitoring
+        self._performance_monitor = PerformanceMonitor()
 
     @staticmethod
     def _is_cuda_available() -> bool:
@@ -74,165 +97,171 @@ class ServerPool:
         """
         logger.debug(f"get_server_for_model called with {model_identifier}")
         # First, try to find a server already loaded with this model
-        for server in self.servers:
+        for server in self.server_manager.servers:
             if server.model == model_identifier and server.is_healthy:
                 server.last_used = time.time()
                 return server
 
         # Then, find an idle server (no model loaded)
-        for server in self.servers:
+        for server in self.server_manager.servers:
             if server.process is None and server.is_healthy:
-                if await self._load_model_into_server(server, model_identifier):
-                    server.last_used = time.time()
-                    return server
+                try:
+                    if await self.server_manager._load_model_into_server(server, model_identifier):
+                        server.last_used = time.time()
+                        return server
+                except GPUAllocationError:
+                    # If GPU allocation failed, continue to try other servers
+                    logger.warning(f"GPU allocation failed for server {server.id}, trying next server")
+                    continue
 
         # Finally, find the least recently used server to evict
         # Sort by last_used, ascending (oldest first)
-        available_servers = [s for s in self.servers if s.is_healthy]
+        available_servers = [s for s in self.server_manager.servers if s.is_healthy]
         if available_servers:
             available_servers.sort(key=lambda s: s.last_used)
             oldest_server = available_servers[0]
-            if await self._load_model_into_server(oldest_server, model_identifier):
-                oldest_server.last_used = time.time()
-                return oldest_server
+            try:
+                if await self.server_manager._load_model_into_server(oldest_server, model_identifier):
+                    oldest_server.last_used = time.time()
+                    return oldest_server
+            except GPUAllocationError:
+                # If GPU allocation failed, return None to indicate failure
+                logger.error(f"GPU allocation failed for all available servers when requesting model {model_identifier}")
+                return None
 
         return None
-
-    async def _load_model_into_server(self, server: ServerInstance, model_identifier: str) -> bool:
-        """
-        Start a llama-server subprocess for the model.
-
-        Args:
-            server: The server instance to start.
-            model_identifier: The model identifier.
-
-        Returns:
-            True if successful, False otherwise.
-        """
-        logger.info(f"_load_model_into_server called for server {server.id} with model {model_identifier}, current process: {server.process is not None}, healthy: {server.is_healthy}")
-        try:
-            # Terminate any existing process
-            if server.process is not None:
-                logger.warning(f"Terminating existing process for server {server.id}")
-                self._terminate_process(server.process, 5)
-                server.process = None
-                logger.info(f"Existing process terminated and cleaned up for server {server.id}")
-
-            logger.info(f"Starting llama-server subprocess for model {model_identifier} on port {server.port}")
-            # Start the llama-server subprocess
-            cmd = [
-                "llama-server",
-                "-hf",
-                model_identifier,
-                "--port",
-                str(server.port),
-                "--log-disable",
-                "--host",
-                "127.0.0.1",
-            ]  # , '--log-verbosity', '0'
-            if self._is_cuda_available() and self.config.gpu_layers > 0:
-                cmd.extend(["--n-gpu-layers", str(self.config.gpu_layers)])
-            process = subprocess.Popen(
-                cmd,
-                # stdout=subprocess.PIPE,
-                # stderr=subprocess.PIPE
-            )
-            server.process = process
-            server.model = model_identifier
-            logger.info(f"Started subprocess for model {model_identifier} on port {server.port}")
-
-            # Wait for the server to be ready
-            for attempt in range(120):  # Wait up to 120 seconds for model download
-                await asyncio.sleep(1)
-                if not HealthChecker.check_process_running(process):
-                    logger.warning(f"Process exited during wait on attempt {attempt}")
-                    break
-                try:
-                    if await HealthChecker.check_http_endpoint("127.0.0.1", server.port, "/health", 1.0):
-                        server.is_healthy = True
-                        logger.info(f"Successfully loaded model {model_identifier} on server {server.id}, port {server.port}")
-                        return True
-                except Exception as e:
-                    logger.debug(f"Health check failed on attempt {attempt}: {e}")
-                    continue
-
-            # If not ready, check if process is still running and get stderr
-            if process.poll() is None:
-                # Process is still running, terminate it
-                logger.warning(f"Terminating process after failed health checks for server {server.id}")
-                self._terminate_process(process, 5)
-                logger.info(f"Failed process terminated for server {server.id}")
-
-            # Read stderr
-            stderr_output = process.stderr.read().decode("utf-8", errors="ignore") if process.stderr else ""
-            logger.error(
-                f"llama-server did not become ready for model {model_identifier} on port {server.port}. Stderr: {stderr_output}",
-            )
-            server.is_healthy = False
-            logger.info(f"Failed to load model {model_identifier} on server {server.id}")
-            return False
-
-        except Exception as e:
-            logger.error(f"Failed to start llama-server for model {model_identifier} on port {server.port}: {e}")
-            if server.process and server.process.stderr:
-                stderr_output = server.process.stderr.read().decode("utf-8", errors="ignore")
-                logger.error(f"llama-server stderr: {stderr_output}")
-            server.is_healthy = False
-            return False
-
+            
     async def check_health(self) -> None:
         """
         Check the health of all servers.
         Marks unhealthy servers and attempts to recover them.
         """
-        for server in self.servers:
-            if server.process is not None:
-                try:
-                    # Perform comprehensive health check
-                    is_healthy = await HealthChecker.check_server_health(
-                        "localhost", server.port, server.process, "/health", 5.0
-                    )
-                    if is_healthy:
-                        server.is_healthy = True
-                        logger.info(f"Health check passed for server {server.id}")
-                    else:
-                        raise Exception("Health check failed")
-                except Exception as e:
-                    logger.warning(f"Server {server.id} health check failed: {e}")
-                    server.is_healthy = False
-                    # Attempt to restart the server
-                    if server.model:
-                        logger.info(f"Attempting recovery for server {server.id} with model {server.model}")
-                        success = await self._load_model_into_server(server, server.model)
-                        server.is_healthy = success
-                        if success:
-                            logger.info(f"Recovery successful for server {server.id}")
-                        else:
-                            logger.warning(f"Recovery failed for server {server.id}")
+        await self.server_manager.check_health()
 
     def get_pool_status(self) -> dict[str, Any]:
         """
-        Get the current status of the server pool.
+        Get the current status of the server pool with GPU information if available.
 
         Returns:
             Dict with pool information.
         """
         result = {
-            "total_servers": len(self.servers),
-            "healthy_servers": sum(1 for s in self.servers if s.is_healthy),
+            "total_servers": len(self.server_manager.servers),
+            "healthy_servers": sum(1 for s in self.server_manager.servers if s.is_healthy),
             "loaded_models": [
-                {"server_id": s.id, "model": s.model, "last_used": s.last_used}
-                for s in self.servers
+                {
+                    "server_id": s.id,
+                    "model": s.model,
+                    "last_used": s.last_used,
+                    "gpu_assignment": s.gpu_assignment.model_dump() if s.gpu_assignment else None
+                }
+                for s in self.server_manager.servers
                 if s.model is not None
             ],
         }
+        
+        # Add GPU pool status if available
+        if self.gpu_monitor:
+            try:
+                from src.entities.gpu_pool_status import GPUPoolStatus
+                gpu_pool_status = GPUPoolStatus(
+                    total_gpus=self.gpu_monitor.get_gpu_count(),
+                    available_gpus=len([g for g in self.gpu_monitor.get_all_gpus() if g.free_memory > 0.1]),
+                    total_memory=sum(g.total_memory for g in self.gpu_monitor.get_all_gpus()),
+                    used_memory=sum(g.used_memory for g in self.gpu_monitor.get_all_gpus()),
+                    free_memory=sum(g.free_memory for g in self.gpu_monitor.get_all_gpus()),
+                    gpus=self.gpu_monitor.get_all_gpus(),
+                    utilization_average=sum(g.utilization for g in self.gpu_monitor.get_all_gpus()) / len(self.gpu_monitor.get_all_gpus()) if self.gpu_monitor.get_all_gpus() else 0.0
+                )
+                result["gpu_pool_status"] = gpu_pool_status.model_dump()
+            except Exception as e:
+                logger.warning(f"Could not get GPU pool status: {e}")
+        
         return result
+
+    def get_active_gpu_assignments(self) -> dict[int, 'GPUAssignment']:
+        """
+        Get the current active GPU assignments for monitoring purposes.
+
+        Returns:
+            Dict mapping server IDs to their GPU assignments
+        """
+        return self.gpu_manager.get_active_gpu_assignments() if self.gpu_manager else {}
+
+    def get_reserved_gpu_resources(self) -> dict[int, float]:
+        """
+        Get the currently reserved GPU resources.
+
+        Returns:
+            Dict mapping GPU IDs to reserved VRAM in GB
+        """
+        return self.gpu_manager.get_reserved_gpu_resources() if self.gpu_manager else {}
+
+    def get_performance_stats(self) -> dict[str, Any]:
+        """
+        Get performance statistics for GPU allocation decisions.
+
+        Returns:
+            Dict containing performance metrics
+        """
+        if self.gpu_manager:
+            return self.gpu_manager.get_performance_stats()
+        else:
+            # Fallback to local performance monitor if no GPU manager
+            return {
+                "average_allocation_time_ms": self._performance_monitor.get_average_allocation_time(),
+                "recent_allocation_time_ms": self._performance_monitor.get_recent_allocation_time(),
+                "allocation_success_count": self._performance_monitor.allocation_success_count,
+                "allocation_failure_count": self._performance_monitor.allocation_failure_count,
+                "total_allocations": self._performance_monitor.allocation_success_count + self._performance_monitor.allocation_failure_count
+            }
 
     def shutdown(self) -> None:
         """Shutdown all servers in the pool."""
-        for server in self.servers:
-            if server.process is not None:
-                self._terminate_process(server.process, 10)
-                server.process = None
-                server.model = None
+        self.server_manager.shutdown()
+
+        # Clean up GPU monitoring resources
+        if self.gpu_monitor:
+            try:
+                self.gpu_monitor.shutdown()
+            except Exception as e:
+                logger.warning(f"Error shutting down GPU monitor: {e}")
+
         logger.info("Server pool shutdown complete")
+
+    async def _estimate_model_vram_requirement(self, model_identifier: str) -> float:
+        """
+        Estimate VRAM requirement for a model.
+        
+        Args:
+            model_identifier: The model identifier to estimate VRAM for
+            
+        Returns:
+            Estimated VRAM requirement in GB
+        """
+        from src.utils.vram_estimator import VramEstimator
+        
+        # Extract model variant information from identifier
+        model_variant = model_identifier.split('/')[-1]  # Get filename part
+        
+        # Fallback: estimate from model variant name
+        return VramEstimator.estimate_vram_from_model_details(
+            parameters=None,  # Will use default estimation
+            variant=model_variant
+        ) or 4.0 # Default to 4GB if estimation fails
+
+    async def _load_model_into_server(self, server, model_identifier, performance_monitor=None):
+        """
+        Wrapper to access the _load_model_into_server method from server_manager.
+        This is needed for testing purposes where tests patch this method on the ServerPool instance.
+        """
+        return await self.server_manager._load_model_into_server(server, model_identifier)
+    
+    def _test_load_model_success(self, server, model_identifier):
+        """
+        Test helper method that simulates successful model loading.
+        This bypasses the complex subprocess mocking required for actual server startup.
+        """
+        server.model = model_identifier
+        server.is_healthy = True
+        return True

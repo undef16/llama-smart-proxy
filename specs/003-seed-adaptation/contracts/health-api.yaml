@@ -1,0 +1,136 @@
+openapi: 3.0.0
+info:
+  title: Llama-Smart-Proxy Health API with GPU Monitoring
+  version: 1.0.0
+  description: API specification for health monitoring with GPU status information
+
+paths:
+  /health:
+    get:
+      summary: Get health status of the proxy and GPU resources
+      description: Returns the health status of all servers in the pool and GPU resource information
+      responses:
+        '200':
+          description: Health status with GPU information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  servers:
+                    type: array
+                    description: List of server instances with their status
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          description: Unique identifier for the server
+                        host:
+                          type: string
+                          description: Host address of the server
+                        port:
+                          type: integer
+                          description: Port number of the server
+                        model_id:
+                          type: string
+                          description: Model currently loaded on the server
+                        status:
+                          type: string
+                          description: Current status of the server
+                          enum: [stopped, running, error]
+                        process:
+                          type: integer
+                          description: Process ID of the server, if running
+                          nullable: true
+                        gpu_assignment:
+                          type: object
+                          description: GPU assignment information for this server
+                          properties:
+                            gpu_ids:
+                              type: array
+                              description: List of GPU IDs assigned to this server
+                              items:
+                                type: integer
+                            estimated_vram_required:
+                              type: number
+                              description: Estimated VRAM required in GB
+                            actual_vram_used:
+                              type: number
+                              description: Actual VRAM used in GB
+                              nullable: true
+                          nullable: true
+                  gpu_pool_status:
+                    type: object
+                    description: Status of GPU resources in the system
+                    properties:
+                      total_gpus:
+                        type: integer
+                        description: Total number of GPUs detected
+                      available_gpus:
+                        type: integer
+                        description: Number of available GPUs
+                      total_vram:
+                        type: number
+                        description: Total VRAM available in GB
+                      available_vram:
+                        type: number
+                        description: Available VRAM in GB
+                      gpu_list:
+                        type: array
+                        description: Detailed information about each GPU
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                              description: GPU device ID
+                            name:
+                              type: string
+                              description: GPU name/model
+                            total_memory:
+                              type: number
+                              description: Total memory in GB
+                            free_memory:
+                              type: number
+                              description: Free memory in GB
+                            used_memory:
+                              type: number
+                              description: Used memory in GB
+                            utilization:
+                              type: number
+                              description: GPU utilization percentage (0-100)
+                            temperature:
+                              type: number
+                              description: Temperature in Celsius
+                              nullable: true
+                            power_usage:
+                              type: number
+                              description: Power usage in watts
+                              nullable: true
+                            assigned_models:
+                              type: array
+                              description: Models currently assigned to this GPU
+                              items:
+                                type: string
+                            compute_capability:
+                              type: string
+                              description: CUDA compute capability
+                              nullable: true
+                      allocation_strategy:
+                        type: string
+                        description: Current allocation strategy
+                        enum: [single-gpu-preferred, distribute]
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    description: Error message
+                  code:
+                    type: string
+                    description: Error code

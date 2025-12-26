@@ -1,4 +1,7 @@
-from typing import Protocol, Optional, Any, TypedDict
+from typing import Protocol, Optional, Any, TypedDict, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.entities.model import Model
 
 
 class ModelDTO(TypedDict):
@@ -15,12 +18,13 @@ class ServerDTO(TypedDict):
     model_id: str
     status: str
     process: Optional[int]
+    gpu_assignment: Optional[dict]  # GPU assignment information as a dict (to match the model_dump())
 
 
 class ModelRepositoryProtocol(Protocol):
-    def get_model(self, model_id: str) -> ModelDTO: ...
+    def get_model(self, model_id: str) -> 'Model': ...
 
-    def get_all_models(self) -> list[ModelDTO]: ...
+    def get_all_models(self) -> list['Model']: ...
 
     def get_servers_for_model(self, model_id: str) -> list[ServerDTO]: ...
 

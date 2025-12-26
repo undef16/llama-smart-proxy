@@ -108,6 +108,43 @@ class SimulationConfig(BaseModel):
     llama_cpp_models: Dict[str, ModelConfig] = Field(default_factory=dict, description="Mapping of model names to configurations for simulation")
 
 
+class GPUConfig(BaseModel):
+    """Configuration for GPU settings.
+
+    Attributes:
+        enabled: Whether GPU monitoring and allocation is enabled.
+        enable_gpu_monitoring: Whether GPU monitoring is enabled.
+        allocation_strategy: Strategy for GPU allocation ("single-gpu-preferred" or "distribute").
+        gpu_allocation_strategy: Strategy for GPU allocation (alias for allocation_strategy).
+        monitoring_interval: Interval for GPU monitoring in seconds.
+        cpu_fallback: Whether to fallback to CPU when GPU is not available.
+        kv_offload: Whether KV cache offloading to CPU is enabled.
+        cache_type_k: KV cache quantization type for K.
+        cache_type_v: KV cache quantization type for V.
+        repack: Whether weight repacking is enabled.
+        no_host: Whether to bypass host buffers.
+        activation_overhead_factor: Overhead factor for activation memory.
+    """
+
+    enabled: bool = Field(True, description="Whether GPU monitoring and allocation is enabled")
+    enable_gpu_monitoring: bool = Field(True, description="Whether GPU monitoring is enabled")
+    allocation_strategy: str = Field("single-gpu-preferred", description="Strategy for GPU allocation ('single-gpu-preferred' or 'distribute')")
+    gpu_allocation_strategy: str | None = Field(None, description="Strategy for GPU allocation (overrides allocation_strategy if set)")
+    monitoring_interval: float = Field(5.0, description="Interval for GPU monitoring in seconds")
+    cpu_fallback: bool = Field(True, description="Whether to fallback to CPU when GPU is not available")
+    kv_offload: bool = Field(True, description="Whether KV cache offloading to CPU is enabled")
+    cache_type_k: str = Field("f16", description="KV cache quantization type for K")
+    cache_type_v: str = Field("f16", description="KV cache quantization type for V")
+    repack: bool = Field(True, description="Whether weight repacking is enabled")
+    no_host: bool = Field(False, description="Whether to bypass host buffers")
+    activation_overhead_factor: float = Field(0.25, description="Overhead factor for activation memory")
+
+    @property
+    def effective_allocation_strategy(self) -> str:
+        """Get the effective allocation strategy, preferring gpu_allocation_strategy if set."""
+        return self.gpu_allocation_strategy or self.allocation_strategy
+
+
 class Config(BaseModel):
     """Main configuration class.
 
@@ -119,6 +156,7 @@ class Config(BaseModel):
         models: Mapping of model names to configurations (deprecated, use simulation.llama_cpp_models).
         agents: List of available agent plugins.
         simulation: Simulation configuration.
+        gpu: GPU configuration settings.
     """
 
     backend: str = Field(..., description="Backend to use ('llama.cpp' or 'ollama')")
@@ -128,6 +166,7 @@ class Config(BaseModel):
     models: Dict[str, ModelConfig] = Field(default_factory=dict, description="Mapping of model names to configurations (deprecated, use simulation.llama_cpp_models)")
     agents: List[str] = Field(default_factory=list, description="List of available agent plugins")
     simulation: SimulationConfig | None = Field(default=None, description="Simulation configuration")
+    gpu: GPUConfig | None = Field(default=None, description="GPU configuration settings")
 
     @property
     def effective_models(self) -> Dict[str, ModelConfig]:

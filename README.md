@@ -1,6 +1,6 @@
 # Llama Smart Proxy
 
-A smart proxy server for Llama models with agent-based request/response processing capabilities, built using Clean Architecture principles. This project provides a FastAPI-based proxy that can load and serve multiple Llama models concurrently, with extensible agent plugins for preprocessing requests and postprocessing responses. It supports multiple LLM backends including llama.cpp and Ollama.
+A smart proxy server for Llama models with agent-based request/response processing capabilities, built using Clean Architecture principles. This project provides a FastAPI-based proxy that can load and serve multiple Llama models concurrently, with extensible agent plugins for preprocessing requests and postprocessing responses. It supports multiple LLM backends including llama.cpp and Ollama, with intelligent GPU resource management and allocation.
 
 ## Features
 
@@ -13,8 +13,19 @@ A smart proxy server for Llama models with agent-based request/response processi
 - **Ollama-Compatible API**: Native Ollama API support for streamlined model operations
 - **Async Processing**: Built with asyncio for high performance
 - **Health Monitoring**: Built-in health checks and server status monitoring
+- **GPU Resource Management**: Intelligent GPU detection, monitoring, and allocation with automatic CPU fallback
+- **VRAM Estimation**: Automatic VRAM requirement calculation for GGUF models
+- **Multi-GPU Support**: Distribute large models across multiple GPUs or prefer single-GPU allocation
 
 ## Installation
+
+### Prerequisites
+
+- Python 3.12+
+- For GPU support: NVIDIA GPU with CUDA drivers and pynvml library
+- For CPU-only operation: No additional requirements
+
+### Setup
 
 1. Clone the repository:
 ```bash
@@ -27,6 +38,11 @@ cd llama-smart-proxy
 pip install -r requirements.txt
 ```
 
+3. (Optional) For GPU support, ensure NVIDIA drivers are installed and CUDA is available:
+```bash
+nvidia-smi  # Verify GPU detection
+```
+
 3. Configure the proxy by editing `config.json`:
 ```json
 {
@@ -34,7 +50,16 @@ pip install -r requirements.txt
   "server_pool": {
     "size": 2,
     "host": "localhost",
-    "port_start": 8001
+    "port_start": 8001,
+    "gpu_layers": 99
+  },
+  "gpu": {
+    "enabled": true,
+    "enable_gpu_monitoring": true,
+    "allocation_strategy": "single-gpu-preferred",
+    "gpu_allocation_strategy": "single-gpu-preferred",
+    "monitoring_interval": 5.0,
+    "cpu_fallback": true
   },
   "ollama": {
     "host": "http://localhost:11434",
@@ -146,6 +171,15 @@ The codebase has been refactored to follow Clean Architecture principles and now
 - `size`: Number of server instances to maintain
 - `host`: Host for server instances
 - `port_start`: Starting port number for servers
+- `gpu_layers`: Number of layers to offload to GPU (0 = CPU only)
+
+### GPU Configuration
+- `enabled`: Enable GPU monitoring and allocation
+- `enable_gpu_monitoring`: Enable GPU monitoring functionality
+- `allocation_strategy`: GPU allocation strategy ("single-gpu-preferred" or "distribute")
+- `gpu_allocation_strategy`: Alternative GPU allocation strategy setting
+- `monitoring_interval`: GPU monitoring interval in seconds
+- `cpu_fallback`: Enable CPU fallback when GPU is unavailable
 
 ### Ollama Configuration
 - `host`: Ollama server URL (default: "http://localhost:11434")
@@ -168,6 +202,129 @@ List of enabled agent plugin names:
 ["agent1", "agent2"]
 ```
 
+## Deployment
+
+### GPU Environment Setup
+
+For production deployment with GPU support:
+
+1. **Install NVIDIA Drivers and CUDA**:
+   ```bash
+   # Ubuntu/Debian
+   sudo apt update
+   sudo apt install nvidia-driver-XXX cuda-toolkit-XX-X
+
+   # Verify installation
+   nvidia-smi
+   nvcc --version
+   ```
+
+2. **Install Python Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   pip install pynvml
+   ```
+
+3. **Configure GPU Settings**:
+   ```json
+   {
+     "gpu": {
+       "enabled": true,
+       "enable_gpu_monitoring": true,
+       "allocation_strategy": "single-gpu-preferred",
+       "monitoring_interval": 5.0,
+       "cpu_fallback": true
+     }
+   }
+   ```
+
+4. **System Requirements**:
+   - NVIDIA GPU with CUDA compute capability 7.0+
+   - Minimum 8GB VRAM for small models
+   - 16GB+ VRAM recommended for larger models
+   - Sufficient system RAM (2x model size recommended)
+
+### Docker Deployment
+
+```dockerfile
+FROM nvidia/cuda:12.2-runtime-ubuntu22.04
+
+# Install Python and dependencies
+RUN apt-get update && apt-get install -y python3 python3-pip
+COPY requirements.txt .
+RUN pip install -r requirements.txt && pip install pynvml
+
+# Copy application
+COPY . /app
+WORKDIR /app
+
+# Run with GPU support
+CMD ["python", "main.py"]
+```
+
+### Kubernetes Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-smart-proxy
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: proxy
+        image: your-registry/llama-smart-proxy:latest
+        resources:
+          limits:
+            nvidia.com/gpu: 1  # Request GPU resources
+        env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "0"
+```
+
+## GPU Troubleshooting
+
+### Common Issues
+
+#### GPU Not Detected
+**Symptoms**: Health endpoint shows no GPUs, models run on CPU only
+**Solutions**:
+1. Verify NVIDIA drivers are installed: `nvidia-smi`
+2. Check CUDA installation: `nvcc --version`
+3. Ensure pynvml is installed: `pip install pynvml`
+4. Check GPU monitoring is enabled in config: `"enable_gpu_monitoring": true`
+
+#### Insufficient GPU Memory
+**Symptoms**: Model loading fails with GPU allocation errors
+**Solutions**:
+1. Check available VRAM: `nvidia-smi`
+2. Reduce `gpu_layers` in server_pool config
+3. Use smaller model variants (Q4_K_M instead of Q8_0)
+4. Enable multi-GPU distribution: `"allocation_strategy": "distribute"`
+
+#### GPU Monitoring Disabled
+**Symptoms**: GPU status not shown in health endpoint
+**Solutions**:
+1. Set `"enable_gpu_monitoring": true` in config
+2. Check pynvml availability
+3. Verify GPU hardware is accessible
+
+#### High GPU Memory Usage
+**Symptoms**: GPU memory not freed after model unloading
+**Solutions**:
+1. Ensure proper server shutdown
+2. Check for GPU context cleanup in logs
+3. Restart server pool if memory leaks persist
+
+### Performance Tuning
+
+- **Single GPU Preferred**: Use for models that fit in one GPU's memory
+- **Multi-GPU Distribution**: Use for large models requiring multiple GPUs
+- **CPU Fallback**: Automatically enabled when GPUs unavailable
+- **Monitoring Interval**: Adjust `monitoring_interval` based on needs (lower = more frequent updates)
+
 ## Development
 
 ### Running Tests
@@ -189,10 +346,12 @@ The codebase follows Clean Architecture principles, organized into layers with d
 ```
 llama-smart-proxy/
 ├── src/
-│   ├── entities/           # Core business objects (Model, Server, Agent, Message)
+│   ├── entities/           # Core business objects (Model, Server, Agent, Message, GPU, GPU Assignment, GPU Pool Status, Performance Monitor)
 │   ├── use_cases/          # Application business logic (ProcessChatCompletion, GetHealth)
-│   ├── interface_adapters/ # Controllers and external interfaces (API, ChatController)
-│   └── frameworks_drivers/ # External frameworks (LLM services, Model repository)
+│   ├── interface_adapters/ # Controllers and external interfaces (API, ChatController, Health Controller)
+│   ├── frameworks_drivers/ # External frameworks (LLM services, Model repository, GPU monitoring, allocation, and management)
+│   └── utils/              # Utility functions (VRAM estimation, GGUF utilities)
+├── specs/                  # Feature specifications and documentation
 ├── tests/                  # Unit tests
 ├── plugins/                # Agent plugins directory
 ├── config.json             # Configuration file
