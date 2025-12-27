@@ -1,14 +1,12 @@
 from typing import Any, Dict, List, Optional, TypedDict
 
-from src.shared.protocols import ModelRepositoryProtocol, ModelDTO, ServerDTO
-from src.frameworks_drivers.gpu_monitor import GPUMonitor
+from src.shared.protocols import ModelRepositoryProtocol, ModelDTO, ServerDTO, GPUMonitorProtocol, ConfigProtocol
 from src.entities.gpu_pool_status import GPUPoolStatus
 from src.entities.gpu import GPU
-from src.frameworks_drivers.config import Config
 
 
 class GetHealth:
-    def __init__(self, model_repository: ModelRepositoryProtocol, gpu_monitor: GPUMonitor, config: Optional[Config] = None):
+    def __init__(self, model_repository: ModelRepositoryProtocol, gpu_monitor: GPUMonitorProtocol, config: Optional[ConfigProtocol] = None):
         self.model_repository = model_repository
         self.gpu_monitor = gpu_monitor
         self.config = config

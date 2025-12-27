@@ -6,7 +6,7 @@ import tempfile
 from unittest.mock import mock_open, patch
 import pytest
 
-from src.utils.gguf_utils import GGUFUtils
+from src.shared.gguf_utils import GGUFUtils
 
 
 class TestGGUFUtils:
@@ -34,21 +34,21 @@ class TestGGUFUtils:
         """Test getting model parameters from GGUF file."""
         # Since we can't easily create a real GGUF file for testing,
         # we'll test the function behavior with a mock
-        with patch('src.utils.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
+        with patch('src.shared.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
             mock_extract.return_value = {'total_parameters': 7_000_000_000}
             params = GGUFUtils.get_model_parameters_from_gguf("dummy.gguf")
             assert params == 7_000_000_000
 
     def test_get_model_parameters_from_gguf_none(self):
         """Test getting model parameters when extraction fails."""
-        with patch('src.utils.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
+        with patch('src.shared.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
             mock_extract.return_value = None
             params = GGUFUtils.get_model_parameters_from_gguf("dummy.gguf")
             assert params is None
     
     def test_get_quantization_info_from_gguf(self):
         """Test getting quantization info from GGUF file."""
-        with patch('src.utils.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
+        with patch('src.shared.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
             mock_extract.return_value = {
                 'metadata': {
                     'general.quantization_version': 'Q4_K_M'
@@ -59,7 +59,7 @@ class TestGGUFUtils:
 
     def test_get_quantization_info_from_gguf_fallback(self):
         """Test getting quantization info with fallback keys."""
-        with patch('src.utils.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
+        with patch('src.shared.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
             mock_extract.return_value = {
                 'metadata': {
                     'quantization_version': 'Q8_0'
@@ -70,7 +70,7 @@ class TestGGUFUtils:
     
     def test_get_model_architecture_from_gguf(self):
         """Test getting model architecture from GGUF file."""
-        with patch('src.utils.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
+        with patch('src.shared.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
             mock_extract.return_value = {
                 'metadata': {
                     'general.architecture': 'llama'
@@ -81,14 +81,14 @@ class TestGGUFUtils:
 
     def test_get_model_architecture_from_gguf_none(self):
         """Test getting model architecture when extraction fails."""
-        with patch('src.utils.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
+        with patch('src.shared.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
             mock_extract.return_value = None
             arch = GGUFUtils.get_model_architecture_from_gguf("dummy.gguf")
             assert arch is None
 
     def test_detect_quantization_from_gguf(self):
         """Test detecting quantization from GGUF file."""
-        with patch('src.utils.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
+        with patch('src.shared.gguf_utils.GGUFUtils.extract_gguf_parameters') as mock_extract:
             mock_extract.return_value = {
                 'metadata': {
                     'general.quantization_version': 'Q4_K_M'

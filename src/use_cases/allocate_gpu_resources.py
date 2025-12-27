@@ -1,5 +1,5 @@
 """
-GPU allocation strategy interface and implementations.
+GPU allocation use case that handles business logic for allocating GPUs to models.
 """
 import logging
 from abc import ABC, abstractmethod
@@ -7,13 +7,13 @@ from typing import List, Optional
 
 from src.entities.gpu import GPU
 from src.entities.gpu_assignment import GPUAssignment
-from src.utils.vram_estimator import VramEstimator
-from src.utils.gguf_utils import GGUFUtils
+from src.shared.vram_estimator import VramEstimator
+from src.shared.gguf_utils import GGUFUtils
 
 
 class GPUAllocationStrategy(ABC):
     """Interface for GPU allocation strategies."""
-    
+
     @abstractmethod
     def allocate_gpus(
         self,
@@ -25,13 +25,13 @@ class GPUAllocationStrategy(ABC):
     ) -> Optional[GPUAssignment]:
         """
         Allocate GPUs for a model based on the strategy.
-        
+
         Args:
             required_vram: Required VRAM in GB
             available_gpus: List of available GPUs
             model_parameters: Number of model parameters
             model_variant: Model variant name
-        
+
         Returns:
             GPUAssignment if allocation successful, None otherwise
         """
@@ -40,10 +40,10 @@ class GPUAllocationStrategy(ABC):
 
 class SingleGPUAllocationStrategy(GPUAllocationStrategy):
     """Strategy that prefers single GPU allocation when possible."""
-    
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-    
+
     def allocate_gpus(
         self,
         required_vram: float,
@@ -54,19 +54,19 @@ class SingleGPUAllocationStrategy(GPUAllocationStrategy):
     ) -> Optional[GPUAssignment]:
         """
         Try to allocate a single GPU that can fit the model.
-        
+
         Args:
             required_vram: Required VRAM in GB
             available_gpus: List of available GPUs sorted by free memory (descending)
             model_parameters: Number of model parameters
             model_variant: Model variant name
-        
+
         Returns:
             GPUAssignment if allocation successful, None otherwise
         """
         # Sort GPUs by free memory in descending order to try largest first
         sorted_gpus = sorted(available_gpus, key=lambda gpu: gpu.free_memory, reverse=True)
-        
+
         # First, try to find a single GPU that can accommodate the model
         for gpu in sorted_gpus:
             if gpu.free_memory >= required_vram:
@@ -77,7 +77,7 @@ class SingleGPUAllocationStrategy(GPUAllocationStrategy):
                     tensor_splits=[1.0],
                     estimated_vram_required=required_vram
                 )
-        
+
         self.logger.info(f"Could not allocate single GPU for {required_vram:.2f}GB requirement. "
                         f"No single GPU has sufficient memory.")
         return None
@@ -100,7 +100,7 @@ class MultiGPUAllocationStrategy(GPUAllocationStrategy):
         self.spread_only_if_necessary = spread_only_if_necessary
         self.vram_headroom_factor = vram_headroom_factor
         self.logger = logging.getLogger(__name__)
-    
+
     def allocate_gpus(
         self,
         required_vram: float,
@@ -223,7 +223,7 @@ class AdaptiveGPUAllocator:
         spread_only_if_necessary=self.config.get('spread_only_if_necessary', True),
         vram_headroom_factor=self.config.get('vram_headroom_factor', 1.1)
     )
-        
+
     def select_best_gpus(
        self,
        required_vram: float,
@@ -327,10 +327,10 @@ class AdaptiveGPUAllocator:
        1. Free memory (higher is better)
        2. Utilization (lower is better)
        3. Other factors could be added as needed
-       
+
        Args:
            gpus: List of available GPUs
-           
+
        Returns:
            List of GPUs sorted by preference (most preferred first)
        """
@@ -338,12 +338,12 @@ class AdaptiveGPUAllocator:
            # Higher score means higher preference
            # Base score on free memory (in GB)
            base_score = gpu.free_memory
-           
+
            # Reduce score based on utilization (lower utilization is better)
            # Utilization is 0-100%, so we subtract a normalized value
            utilization_penalty = gpu.utilization / 10.0  # Max penalty of 10 for 100% utilization
            score = base_score - utilization_penalty
-           
+
            return score
 
        # Sort in descending order (highest score first)
@@ -381,7 +381,7 @@ class AdaptiveGPUAllocator:
        gguf_path: str,
        assignment: GPUAssignment,
        available_gpus: List[GPU]
-    ) -> Optional[int]:
+   ) -> Optional[int]:
        """
        Calculate the optimal number of GPU layers based on model layers and available VRAM.
 
@@ -504,4 +504,54 @@ class AdaptiveGPUAllocator:
             no_host=no_host,
             activation_overhead_factor=activation_overhead_factor
         )
-   
+
+
+class AllocateGPUResources:
+    """Use case for allocating GPU resources to models."""
+
+    def __init__(self, config: Optional[dict] = None):
+        self.allocator = AdaptiveGPUAllocator(config)
+
+    def execute(
+        self,
+        required_vram: float,
+        available_gpus: List[GPU],
+        model_parameters: Optional[int] = None,
+        model_variant: Optional[str] = None,
+        gguf_path: Optional[str] = None
+    ) -> Optional[GPUAssignment]:
+        """
+        Execute GPU allocation for a model.
+
+        Args:
+            required_vram: Required VRAM in GB
+            available_gpus: List of available GPUs
+            model_parameters: Number of model parameters
+            model_variant: Model variant name
+            gguf_path: Path to GGUF file
+
+        Returns:
+            GPUAssignment if allocation successful, None otherwise
+        """
+        return self.allocator.allocate_gpus(
+            required_vram, available_gpus, model_parameters, model_variant, gguf_path
+        )
+
+    def estimate_vram(
+        self,
+        model_parameters: Optional[int] = None,
+        model_variant: Optional[str] = None,
+        gguf_path: Optional[str] = None
+    ) -> Optional[float]:
+        """
+        Estimate VRAM requirements for a model.
+
+        Args:
+            model_parameters: Number of model parameters
+            model_variant: Model variant name
+            gguf_path: Path to GGUF file
+
+        Returns:
+            Estimated VRAM in GB or None
+        """
+        return self.allocator.estimate_model_vram(model_parameters, model_variant, gguf_path)

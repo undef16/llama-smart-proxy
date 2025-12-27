@@ -9,8 +9,8 @@ from src.entities.gpu_assignment import GPUAssignment
 def test_gpu_detector_without_pynvml():
     """Test GPU detector gracefully handles missing pynvml library."""
     # Mock pynvml in the gpu_detector module to None
-    with patch('src.frameworks_drivers.gpu_detector.pynvml', None):
-        from src.frameworks_drivers.gpu_detector import GPUDetector
+    with patch('src.frameworks_drivers.gpu.gpu_detector.pynvml', None):
+        from src.frameworks_drivers.gpu.gpu_detector import GPUDetector
         detector = GPUDetector()
         gpus = detector.detect_gpus()
         assert gpus == []
@@ -18,17 +18,16 @@ def test_gpu_detector_without_pynvml():
 
 def test_gpu_detector_with_pynvml_but_no_gpus():
     """Test GPU detector when pynvml is available but no GPUs are present."""
-    # Import pynvml inside the test to handle import errors gracefully
-    try:
-        import pynvml  # This will import either nvidia-ml-py or pynvml (both use same import)
-    except ImportError:
+    from src.shared.gpu_utils import GPUUtils
+    pynvml = GPUUtils.safe_import_pynvml()
+    if pynvml is None:
         # If pynvml is not available, skip this test
         pytest.skip("pynvml/nvidia-ml-py not available, skipping test")
         return
 
     # Mock pynvml to simulate no GPUs
     with patch.object(pynvml, 'nvmlInit', side_effect=pynvml.NVMLError(1)):
-        from src.frameworks_drivers.gpu_detector import GPUDetector
+        from src.frameworks_drivers.gpu.gpu_detector import GPUDetector
         detector = GPUDetector()
         gpus = detector.detect_gpus()
         assert gpus == []

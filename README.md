@@ -22,7 +22,7 @@ A smart proxy server for Llama models with agent-based request/response processi
 ### Prerequisites
 
 - Python 3.12+
-- For GPU support: NVIDIA GPU with CUDA drivers and pynvml library
+- For GPU support: NVIDIA GPU with CUDA compute capability 6.1+, CUDA drivers, and pynvml library
 - For CPU-only operation: No additional requirements
 
 ### Setup
@@ -239,7 +239,7 @@ For production deployment with GPU support:
    ```
 
 4. **System Requirements**:
-   - NVIDIA GPU with CUDA compute capability 7.0+
+   - NVIDIA GPU with CUDA compute capability 6.1+
    - Minimum 8GB VRAM for small models
    - 16GB+ VRAM recommended for larger models
    - Sufficient system RAM (2x model size recommended)

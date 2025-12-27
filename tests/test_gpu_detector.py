@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import Mock, patch
 
 from src.entities.gpu import GPU
-from src.frameworks_drivers.gpu_detector import GPUDetector
+from src.frameworks_drivers.gpu.gpu_detector import GPUDetector
 
 
 class TestGPUDetector:
@@ -19,7 +19,7 @@ class TestGPUDetector:
         assert detector.detected_gpus == []
         assert detector.gpu_available is False
     
-    @patch('src.frameworks_drivers.gpu_detector.pynvml')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.pynvml')
     def test_detect_gpus_success(self, mock_pynvml):
         """Test successful GPU detection."""
         # Mock pynvml functions
@@ -64,7 +64,7 @@ class TestGPUDetector:
             assert gpus[1].id == 1
             assert detector.gpu_available is True
     
-    @patch('src.frameworks_drivers.gpu_detector.pynvml')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.pynvml')
     def test_detect_gpus_no_gpus_found(self, mock_pynvml):
         """Test GPU detection when no GPUs are found."""
         # Mock pynvml to indicate GPUs are available but return empty list
@@ -86,7 +86,7 @@ class TestGPUDetector:
             assert len(gpus) == 0
             assert detector.gpu_available is False
     
-    @patch('src.frameworks_drivers.gpu_detector.pynvml')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.pynvml')
     def test_is_gpu_available(self, mock_pynvml):
         """Test checking if GPU is available."""
         mock_pynvml.nvmlInit = Mock()
@@ -101,7 +101,7 @@ class TestGPUDetector:
         detector.gpu_available = True
         assert detector.is_gpu_available() is True
     
-    @patch('src.frameworks_drivers.gpu_detector.pynvml')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.pynvml')
     def test_get_available_gpus(self, mock_pynvml):
         """Test getting available GPUs."""
         mock_pynvml.nvmlInit = Mock()
@@ -126,7 +126,7 @@ class TestGPUDetector:
         assert len(available_gpus) == 1
         assert available_gpus[0].id == 0
     
-    @patch('src.frameworks_drivers.gpu_detector.pynvml')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.pynvml')
     def test_get_available_gpus_not_available(self, mock_pynvml):
         """Test getting available GPUs when GPU is not available."""
         mock_pynvml.nvmlInit = Mock()
@@ -150,7 +150,7 @@ class TestGPUDetector:
         
         assert len(available_gpus) == 0
     
-    @patch('src.frameworks_drivers.gpu_detector.pynvml')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.pynvml')
     def test_initialize_gpu_environment_success(self, mock_pynvml):
         """Test successful GPU environment initialization."""
         mock_pynvml.nvmlInit = Mock()
@@ -170,7 +170,7 @@ class TestGPUDetector:
             assert result is True
             mock_detect.assert_called_once()
     
-    @patch('src.frameworks_drivers.gpu_detector.pynvml')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.pynvml')
     def test_initialize_gpu_environment_failure(self, mock_pynvml):
         """Test GPU environment initialization failure."""
         mock_pynvml.nvmlInit = Mock()

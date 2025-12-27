@@ -1,6 +1,7 @@
 from typing import Protocol, Optional, Any, TypedDict, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from src.entities.gpu import GPU
     from src.entities.model import Model
 
 
@@ -51,3 +52,15 @@ class AgentManagerProtocol(Protocol):
     def execute_request_hooks(self, request: dict, agent_chain: list) -> dict: ...
 
     def execute_response_hooks(self, response: dict, agent_chain: list) -> dict: ...
+
+
+class GPUMonitorProtocol(Protocol):
+    @property
+    def initialized(self) -> bool: ...
+
+    def get_all_gpus(self, gpu_assignments: Optional[dict[int, list[str]]] = None) -> list['GPU']: ...
+
+
+class ConfigProtocol(Protocol):
+    @property
+    def gpu(self) -> Any: ...

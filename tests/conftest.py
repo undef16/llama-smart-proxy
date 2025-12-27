@@ -14,7 +14,8 @@ def pytest_configure(config):
     """Configure pytest warnings."""
     config.addinivalue_line("filterwarnings", "ignore::PendingDeprecationWarning")
 
-from src.frameworks_drivers.config import Config
+from src.frameworks_drivers.config import Config, ServerPoolConfig
+from src.frameworks_drivers.server_pool import ServerPool
 
 
 @pytest.fixture
@@ -255,6 +256,14 @@ def incomplete_plugins_dir(temp_dir):
     return str(plugins_dir)
 
 
+@pytest.fixture
+def server_pool_config():
+    return ServerPoolConfig(size=2, host="localhost", port_start=8080, gpu_layers=10, request_timeout=300)
+
+
+@pytest.fixture
+def server_pool(server_pool_config):
+    return ServerPool(server_pool_config)
 
 
 

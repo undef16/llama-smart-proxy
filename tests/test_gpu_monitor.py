@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 
 from src.entities.gpu import GPU
-from src.frameworks_drivers.gpu_monitor import GPUMonitor
+from src.frameworks_drivers.gpu.gpu_monitor import GPUMonitor
 
 
 class TestGPUMonitor:
@@ -13,7 +13,7 @@ class TestGPUMonitor:
     
     def test_gpu_monitor_initialization_success(self):
         """Test successful initialization of GPU monitor."""
-        with patch('src.frameworks_drivers.gpu_monitor.pynvml') as mock_pynvml:
+        with patch('src.frameworks_drivers.gpu.gpu_monitor.pynvml') as mock_pynvml:
             # Mock successful initialization
             mock_pynvml.nvmlInit = Mock()
             mock_pynvml.NVMLError = Exception  # Mock the exception class
@@ -25,7 +25,7 @@ class TestGPUMonitor:
     
     def test_gpu_monitor_initialization_failure(self):
         """Test GPU monitor initialization failure."""
-        with patch('src.frameworks_drivers.gpu_monitor.pynvml') as mock_pynvml:
+        with patch('src.frameworks_drivers.gpu.gpu_monitor.pynvml') as mock_pynvml:
             # Mock initialization failure
             mock_pynvml.nvmlInit.side_effect = Exception("Initialization failed")
             mock_pynvml.NVMLError = Exception  # Mock the exception class
@@ -36,7 +36,7 @@ class TestGPUMonitor:
     
     def test_get_gpu_count_initialized(self):
         """Test getting GPU count when initialized."""
-        with patch('src.frameworks_drivers.gpu_monitor.pynvml') as mock_pynvml:
+        with patch('src.frameworks_drivers.gpu.gpu_monitor.pynvml') as mock_pynvml:
             mock_pynvml.nvmlInit = Mock()
             mock_pynvml.nvmlDeviceGetCount = Mock(return_value=2)
             mock_pynvml.NVMLError = Exception
@@ -49,7 +49,7 @@ class TestGPUMonitor:
     
     def test_get_gpu_count_not_initialized(self):
         """Test getting GPU count when not initialized."""
-        with patch('src.frameworks_drivers.gpu_monitor.pynvml') as mock_pynvml:
+        with patch('src.frameworks_drivers.gpu.gpu_monitor.pynvml') as mock_pynvml:
             mock_pynvml.nvmlInit = Mock(side_effect=Exception())
             mock_pynvml.NVMLError = Exception
             
@@ -60,7 +60,7 @@ class TestGPUMonitor:
     
     def test_get_gpu_info_success(self):
         """Test getting GPU info successfully."""
-        with patch('src.frameworks_drivers.gpu_monitor.pynvml') as mock_pynvml:
+        with patch('src.frameworks_drivers.gpu.gpu_monitor.pynvml') as mock_pynvml:
             mock_pynvml.nvmlInit = Mock()
             mock_handle = Mock()
             mock_pynvml.nvmlDeviceGetHandleByIndex = Mock(return_value=mock_handle)
@@ -88,7 +88,7 @@ class TestGPUMonitor:
     
     def test_get_gpu_info_failure(self):
         """Test getting GPU info when pynvml operations fail."""
-        with patch('src.frameworks_drivers.gpu_monitor.pynvml') as mock_pynvml:
+        with patch('src.frameworks_drivers.gpu.gpu_monitor.pynvml') as mock_pynvml:
             mock_pynvml.nvmlInit = Mock()
             mock_pynvml.nvmlDeviceGetHandleByIndex = Mock(side_effect=Exception("Device error"))
             mock_pynvml.NVMLError = Exception
@@ -100,7 +100,7 @@ class TestGPUMonitor:
     
     def test_get_all_gpus(self):
         """Test getting all GPUs."""
-        with patch('src.frameworks_drivers.gpu_monitor.pynvml') as mock_pynvml:
+        with patch('src.frameworks_drivers.gpu.gpu_monitor.pynvml') as mock_pynvml:
             mock_pynvml.nvmlInit = Mock()
             mock_pynvml.nvmlDeviceGetCount = Mock(return_value=2)
             mock_pynvml.nvmlDeviceGetHandleByIndex = Mock()

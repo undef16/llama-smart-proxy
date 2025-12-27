@@ -6,14 +6,12 @@ Both libraries have the same API, ensuring compatibility while addressing the de
 import logging
 from typing import List, Optional
 
+from src.shared.gpu_utils import GPUUtils
+
 # The nvidia-ml-py library uses the same import statement as the old pynvml library (import pynvml)
 # When both are installed, Python will import whichever is available, with package resolution determining priority
 # nvidia-ml-py is installed first in requirements.txt, so it should take precedence
-try:
-    import pynvml  # This will import either nvidia-ml-py or pynvml (both use same import)
-except ImportError:
-    # If neither library is available, we'll handle the error when the library is used
-    pynvml = None
+pynvml = GPUUtils.safe_import_pynvml()
 
 from src.entities.gpu import GPU
 from src.frameworks_drivers.config import Config

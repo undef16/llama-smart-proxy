@@ -15,10 +15,10 @@ from src.entities.performance_monitor import PerformanceMonitor
 # Import GPU-related modules
 if TYPE_CHECKING:
     from src.entities.gpu_assignment import GPUAssignment
-    from src.frameworks_drivers.gpu_allocator import AdaptiveGPUAllocator
     from src.frameworks_drivers.gpu_detector import GPUDetector
     from src.frameworks_drivers.gpu_monitor import GPUMonitor
     from src.frameworks_drivers.model_repository import ModelRepository
+    from src.use_cases.allocate_gpu_resources import AllocateGPUResources
 
 logger = Logger.get(__name__)
 
@@ -28,11 +28,11 @@ class GPUResourceManager:
     Manages GPU resource allocation, reservation, and validation for server pool.
     """
 
-    def __init__(self, gpu_detector, gpu_allocator, model_repository):
+    def __init__(self, gpu_detector, allocate_gpu_resources_use_case, model_repository, performance_monitor: Optional[PerformanceMonitor] = None):
         self.gpu_detector = gpu_detector
-        self.gpu_allocator = gpu_allocator
+        self.allocate_gpu_resources_use_case = allocate_gpu_resources_use_case
         self.model_repository = model_repository
-        self.performance_monitor = PerformanceMonitor()
+        self.performance_monitor = performance_monitor or PerformanceMonitor()
         self._active_gpu_assignments: dict[int, 'GPUAssignment'] = {}  # server_id -> GPUAssignment
         self._reserved_gpu_resources: dict[int, float] = {}  # gpu_id -> reserved_vram_in_gb
 
@@ -53,7 +53,7 @@ class GPUResourceManager:
         start_time = time.time()
 
         try:
-            if self.gpu_allocator and self.gpu_detector:
+            if self.allocate_gpu_resources_use_case and self.gpu_detector:
                 self.gpu_detector.detect_gpus()
 
                 if not self.gpu_detector.is_gpu_available():
@@ -73,13 +73,13 @@ class GPUResourceManager:
                         logger.debug(f"Available GPUs for allocation: {[f'GPU{gpu.id}({gpu.free_memory:.1f}GB)' for gpu in available_gpus]}")
 
                         if available_gpus:
-                            # Perform GPU allocation using the allocator
+                            # Perform GPU allocation using the use case
                             # Pass model_identifier as gguf_path if it's a local file (GGUF)
                             gguf_path = model_identifier if model_identifier.endswith('.gguf') else None
                             if gguf_path:
-                                gpu_assignment = self.gpu_allocator.allocate_gpus(required_vram, available_gpus, gguf_path=gguf_path)
+                                gpu_assignment = self.allocate_gpu_resources_use_case.execute(required_vram, available_gpus, gguf_path=gguf_path)
                             else:
-                                gpu_assignment = self.gpu_allocator.allocate_gpus(required_vram, available_gpus)
+                                gpu_assignment = self.allocate_gpu_resources_use_case.execute(required_vram, available_gpus)
                             if gpu_assignment:
                                 logger.debug(f"GPU allocator returned assignment: {gpu_assignment.gpu_ids}, "
                                             f"VRAM required: {gpu_assignment.estimated_vram_required:.2f}GB")
@@ -160,9 +160,9 @@ class GPUResourceManager:
             model = self.model_repository.get_model(model_identifier)
             logger.debug(f"Retrieved model details from repository: {model_identifier}, parameters: {model.parameters}, variant: {model.variant}")
 
-            # Use the GPU allocator's VRAM estimation method
-            if self.gpu_allocator and hasattr(self.gpu_allocator, 'estimate_model_vram'):
-                estimated_vram = self.gpu_allocator.estimate_model_vram(
+            # Use the allocate GPU resources use case's VRAM estimation method
+            if self.allocate_gpu_resources_use_case:
+                estimated_vram = self.allocate_gpu_resources_use_case.estimate_vram(
                     model_parameters=model.parameters,
                     model_variant=model.variant
                 )
@@ -172,7 +172,7 @@ class GPUResourceManager:
                     logger.warning(f"VRAM estimation returned None for model {model_identifier}")
                 return estimated_vram
             else:
-                logger.warning("GPU allocator not available or does not have estimate_model_vram method")
+                logger.warning("Allocate GPU resources use case not available")
                 return None
 
         except KeyError as e:

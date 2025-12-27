@@ -3,7 +3,7 @@ Tests for VRAM estimation functionality.
 """
 import pytest
 
-from src.utils.vram_estimator import VramEstimator
+from src.shared.vram_estimator import VramEstimator
 
 
 class TestVRAMEstimator:

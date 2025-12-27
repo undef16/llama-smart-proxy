@@ -2,7 +2,7 @@ from src.entities.model import Model
 from src.entities.server import Server
 from src.shared.protocols import ModelRepositoryProtocol as ModelRepositoryProtocol, ServerDTO
 from src.frameworks_drivers.model_resolver import ModelResolver
-from src.utils.gguf_utils import GGUFUtils
+from src.shared.gguf_utils import GGUFUtils
 
 
 

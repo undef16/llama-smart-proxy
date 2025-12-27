@@ -6,14 +6,12 @@ Both libraries have the same API, ensuring compatibility while addressing the de
 import logging
 from typing import List, Optional
 
-# Import the nvidia-ml-py library (new official library) or pynvml (deprecated but compatible)
-try:
-   import pynvml  # This will import either nvidia-ml-py or pynvml (both use same import)
-except ImportError:
-   pynvml = None
+from src.shared.gpu_utils import GPUUtils
+
+pynvml = GPUUtils.safe_import_pynvml()
 
 from src.entities.gpu import GPU
-from src.frameworks_drivers.gpu_monitor import GPUMonitor
+from src.frameworks_drivers.gpu.gpu_monitor import GPUMonitor
 from src.frameworks_drivers.config import Config
 
 

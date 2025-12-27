@@ -7,10 +7,10 @@ import time
 
 from src.entities.gpu import GPU
 from src.entities.gpu_assignment import GPUAssignment
-from src.frameworks_drivers.gpu_allocator import (
+from src.use_cases.allocate_gpu_resources import (
     SingleGPUAllocationStrategy,
     MultiGPUAllocationStrategy,
-    AdaptiveGPUAllocator
+    AllocateGPUResources
 )
 from src.frameworks_drivers.server_pool import ServerPool, GPUAllocationError
 from src.entities.performance_monitor import PerformanceMonitor
@@ -53,7 +53,7 @@ class TestGPUAllocationIntegration:
         return ServerPool(config, model_repository=mock_model_repo_instance)
     
     @patch('src.frameworks_drivers.model_repository.ModelRepository')
-    @patch('src.frameworks_drivers.gpu_detector.GPUDetector')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.GPUDetector')
     @patch('subprocess.Popen')
     def test_model_loading_with_gpu_allocation_single_gpu(self, mock_popen, mock_gpu_detector, mock_model_repository):
         """Test model loading with single GPU allocation."""
@@ -62,26 +62,26 @@ class TestGPUAllocationIntegration:
         mock_model_repo_instance = Mock()
         mock_gpu_detector.return_value = mock_detector_instance
         mock_model_repository.return_value = mock_model_repo_instance
-        
+
         # Create GPUs for testing
         gpu0 = self._create_gpu(0, "NVIDIA GeForce RTX 4090", 24.0, 20.0, 4.0)
         gpu1 = self._create_gpu(1, "NVIDIA GeForce RTX 4080", 16.0, 12.0, 4.0)
         mock_detector_instance.get_available_gpus.return_value = [gpu0, gpu1]
         mock_detector_instance.is_gpu_available.return_value = True
         mock_detector_instance.is_pynvml_available.return_value = True
-        
+
         # Create server pool
         pool = self._create_server_pool(mock_model_repo_instance)
-        
+
         # Mock the GPU allocator in the GPU resource manager
         mock_allocator_instance = Mock()
         mock_assignment = GPUAssignment(gpu_ids=[0], tensor_splits=[1.0], estimated_vram_required=8.0)
-        mock_allocator_instance.allocate_gpus.return_value = mock_assignment
-        
+        mock_allocator_instance.execute.return_value = mock_assignment
+
         # Replace the allocator in the GPU resource manager
         if pool.gpu_manager:
-            pool.gpu_manager.gpu_allocator = mock_allocator_instance
-        
+            pool.gpu_manager.allocate_gpu_resources_use_case = mock_allocator_instance
+
         # Mock the health checker to return True for endpoint checks
         with patch('src.shared.health_checker.HealthChecker.check_http_endpoint', return_value=True):
             with patch('src.shared.health_checker.HealthChecker.check_process_running', return_value=True):
@@ -89,9 +89,9 @@ class TestGPUAllocationIntegration:
                 with patch.object(pool.gpu_manager, '_estimate_model_vram_requirement', return_value=8.0):
                     import asyncio
                     server = asyncio.run(pool.get_server_for_model("llama-3.2-8b-instruct.Q4_K_M.gguf"))
-                     
+
                     # Verify that allocation was called with the right parameters
-                    mock_allocator_instance.allocate_gpus.assert_called_once_with(8.0, [gpu0, gpu1], gguf_path='llama-3.2-8b-instruct.Q4_K_M.gguf')
+                    mock_allocator_instance.execute.assert_called_once_with(8.0, [gpu0, gpu1], gguf_path='llama-3.2-8b-instruct.Q4_K_M.gguf')
                      
                     # Server should be returned successfully
                     assert server is not None
@@ -100,7 +100,7 @@ class TestGPUAllocationIntegration:
                     assert server.gpu_assignment.estimated_vram_required == 8.0
             
     @patch('src.frameworks_drivers.model_repository.ModelRepository')
-    @patch('src.frameworks_drivers.gpu_detector.GPUDetector')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.GPUDetector')
     @patch('subprocess.Popen')
     def test_model_loading_with_gpu_allocation_multi_gpu(self, mock_popen, mock_gpu_detector, mock_model_repository):
         """Test model loading with multi-GPU allocation."""
@@ -109,26 +109,26 @@ class TestGPUAllocationIntegration:
         mock_model_repo_instance = Mock()
         mock_gpu_detector.return_value = mock_detector_instance
         mock_model_repository.return_value = mock_model_repo_instance
-        
+
         # Create GPUs for testing
         gpu0 = self._create_gpu(0, "NVIDIA GeForce RTX 4090", 24.0, 10.0, 14.0)
         gpu1 = self._create_gpu(1, "NVIDIA GeForce RTX 4080", 16.0, 8.0, 8.0)
         mock_detector_instance.get_available_gpus.return_value = [gpu0, gpu1]
         mock_detector_instance.is_gpu_available.return_value = True
         mock_detector_instance.is_pynvml_available.return_value = True
-        
+
         # Create server pool
         pool = self._create_server_pool(mock_model_repo_instance)
-        
+
         # Mock the GPU allocator in the GPU resource manager
         mock_allocator_instance = Mock()
         mock_assignment = GPUAssignment(gpu_ids=[0, 1], tensor_splits=[0.5, 0.5], estimated_vram_required=15.0)
-        mock_allocator_instance.allocate_gpus.return_value = mock_assignment
-        
+        mock_allocator_instance.execute.return_value = mock_assignment
+
         # Replace the allocator in the GPU resource manager
         if pool.gpu_manager:
-            pool.gpu_manager.gpu_allocator = mock_allocator_instance
-        
+            pool.gpu_manager.allocate_gpu_resources_use_case = mock_allocator_instance
+
         # Mock the health checker to return True for endpoint checks
         with patch('src.shared.health_checker.HealthChecker.check_http_endpoint', return_value=True):
             with patch('src.shared.health_checker.HealthChecker.check_process_running', return_value=True):
@@ -136,9 +136,9 @@ class TestGPUAllocationIntegration:
                 with patch.object(pool.gpu_manager, '_estimate_model_vram_requirement', return_value=15.0):
                     import asyncio
                     server = asyncio.run(pool.get_server_for_model("llama-3.1-70b-instruct.Q4_K_M.gguf"))
-                     
+
                     # Verify that allocation was called with the right parameters
-                    mock_allocator_instance.allocate_gpus.assert_called_once_with(15.0, [gpu0, gpu1], gguf_path='llama-3.1-70b-instruct.Q4_K_M.gguf')
+                    mock_allocator_instance.execute.assert_called_once_with(15.0, [gpu0, gpu1], gguf_path='llama-3.1-70b-instruct.Q4_K_M.gguf')
                      
                     # Server should be returned successfully
                     assert server is not None
@@ -147,7 +147,7 @@ class TestGPUAllocationIntegration:
                     assert server.gpu_assignment.estimated_vram_required == 15.0
     
     @patch('src.frameworks_drivers.model_repository.ModelRepository')
-    @patch('src.frameworks_drivers.gpu_detector.GPUDetector')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.GPUDetector')
     @patch('subprocess.Popen')
     def test_model_loading_insufficient_gpu_resources(self, mock_popen, mock_gpu_detector, mock_model_repository):
         """Test model loading when there are insufficient GPU resources."""
@@ -156,24 +156,24 @@ class TestGPUAllocationIntegration:
         mock_model_repo_instance = Mock()
         mock_gpu_detector.return_value = mock_detector_instance
         mock_model_repository.return_value = mock_model_repo_instance
-        
+
         # Create GPUs for testing
         gpu0 = self._create_gpu(0, "NVIDIA GeForce RTX 3060", 12.0, 2.0, 10.0)  # Only 2GB free
         mock_detector_instance.get_available_gpus.return_value = [gpu0]
         mock_detector_instance.is_gpu_available.return_value = True
         mock_detector_instance.is_pynvml_available.return_value = True
-        
+
         # Create server pool
         pool = self._create_server_pool(mock_model_repo_instance)
-        
+
         # Mock the GPU allocator in the GPU resource manager
         mock_allocator_instance = Mock()
-        mock_allocator_instance.allocate_gpus.return_value = None
-        
+        mock_allocator_instance.execute.return_value = None
+
         # Replace the allocator in the GPU resource manager
         if pool.gpu_manager:
-            pool.gpu_manager.gpu_allocator = mock_allocator_instance
-        
+            pool.gpu_manager.allocate_gpu_resources_use_case = mock_allocator_instance
+
         # Mock the health checker to return True for endpoint checks
         with patch('src.shared.health_checker.HealthChecker.check_http_endpoint', return_value=True):
             with patch('src.shared.health_checker.HealthChecker.check_process_running', return_value=True):
@@ -181,15 +181,15 @@ class TestGPUAllocationIntegration:
                 with patch.object(pool.gpu_manager, '_estimate_model_vram_requirement', return_value=10.0):
                     import asyncio
                     server = asyncio.run(pool.get_server_for_model("llama-3.1-70b-instruct.Q4_K_M.gguf"))
-                     
+
                     # Verify that allocation was called with the right parameters
-                    mock_allocator_instance.allocate_gpus.assert_called_once_with(10.0, [gpu0], gguf_path='llama-3.1-70b-instruct.Q4_K_M.gguf')
+                    mock_allocator_instance.execute.assert_called_once_with(10.0, [gpu0], gguf_path='llama-3.1-70b-instruct.Q4_K_M.gguf')
                      
                     # Server should be None because of GPU allocation failure
                     assert server is None
     
     @patch('src.frameworks_drivers.model_repository.ModelRepository')
-    @patch('src.frameworks_drivers.gpu_detector.GPUDetector')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.GPUDetector')
     @patch('subprocess.Popen')
     def test_gpu_assignment_cleanup_on_server_shutdown(self, mock_popen, mock_gpu_detector, mock_model_repository):
         """Test that GPU assignments are properly cleaned up when servers are shutdown."""
@@ -211,11 +211,11 @@ class TestGPUAllocationIntegration:
         # Mock the GPU allocator in the GPU resource manager
         mock_allocator_instance = Mock()
         mock_assignment = GPUAssignment(gpu_ids=[0], tensor_splits=[1.0], estimated_vram_required=8.0)
-        mock_allocator_instance.allocate_gpus.return_value = mock_assignment
+        mock_allocator_instance.execute.return_value = mock_assignment
         
         # Replace the allocator in the GPU resource manager
         if pool.gpu_manager:
-            pool.gpu_manager.gpu_allocator = mock_allocator_instance
+            pool.gpu_manager.allocate_gpu_resources_use_case = mock_allocator_instance
         
         # Mock the health checker to return True for endpoint checks
         with patch('src.shared.health_checker.HealthChecker.check_http_endpoint', return_value=True):
@@ -237,7 +237,7 @@ class TestGPUAllocationIntegration:
                     assert server.gpu_assignment is None
     
     @patch('src.frameworks_drivers.model_repository.ModelRepository')
-    @patch('src.frameworks_drivers.gpu_detector.GPUDetector')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.GPUDetector')
     @patch('subprocess.Popen')
     def test_concurrent_gpu_allocation_requests(self, mock_popen, mock_gpu_detector, mock_model_repository):
         """Test handling of GPU allocation requests."""
@@ -259,17 +259,17 @@ class TestGPUAllocationIntegration:
         
         # Mock the GPU allocator in the GPU resource manager
         mock_allocator_instance = Mock()
-        def mock_allocate_gpus(required_vram, available_gpus, gguf_path=None):
+        def mock_execute(required_vram, available_gpus, gguf_path=None):
             if required_vram <= 10.0:
                 return GPUAssignment(gpu_ids=[0], tensor_splits=[1.0], estimated_vram_required=required_vram)
             else:
                 return GPUAssignment(gpu_ids=[0, 1], tensor_splits=[0.5, 0.5], estimated_vram_required=required_vram)
 
-        mock_allocator_instance.allocate_gpus.side_effect = mock_allocate_gpus
+        mock_allocator_instance.execute.side_effect = mock_execute
         
         # Replace the allocator in the GPU resource manager
         if pool.gpu_manager:
-            pool.gpu_manager.gpu_allocator = mock_allocator_instance
+            pool.gpu_manager.allocate_gpu_resources_use_case = mock_allocator_instance
         
         # Mock the health checker to return True for endpoint checks
         with patch('src.shared.health_checker.HealthChecker.check_http_endpoint', return_value=True):
@@ -298,7 +298,7 @@ class TestGPUAllocationIntegration:
                     assert len(server2.gpu_assignment.gpu_ids) >= len(server1.gpu_assignment.gpu_ids)
             
     @patch('src.frameworks_drivers.model_repository.ModelRepository')
-    @patch('src.frameworks_drivers.gpu_detector.GPUDetector')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.GPUDetector')
     @patch('subprocess.Popen')
     def test_model_fits_on_single_gpu(self, mock_popen, mock_gpu_detector, mock_model_repository):
         """Test scenario: Model fits on single GPU (from quickstart.md)."""
@@ -320,11 +320,11 @@ class TestGPUAllocationIntegration:
         # Mock the GPU allocator in the GPU resource manager
         mock_allocator_instance = Mock()
         mock_assignment = GPUAssignment(gpu_ids=[0], tensor_splits=[1.0], estimated_vram_required=8.0)  # Small model that fits on one GPU
-        mock_allocator_instance.allocate_gpus.return_value = mock_assignment
+        mock_allocator_instance.execute.return_value = mock_assignment
         
         # Replace the allocator in the GPU resource manager
         if pool.gpu_manager:
-            pool.gpu_manager.gpu_allocator = mock_allocator_instance
+            pool.gpu_manager.allocate_gpu_resources_use_case = mock_allocator_instance
         
         # Mock the health checker to return True for endpoint checks
         with patch('src.shared.health_checker.HealthChecker.check_http_endpoint', return_value=True):
@@ -335,7 +335,7 @@ class TestGPUAllocationIntegration:
                     server = asyncio.run(pool.get_server_for_model("llama-3.2-8b-instruct.Q4_K_M.gguf"))
                      
                     # Verify that allocation was called with the right parameters
-                    mock_allocator_instance.allocate_gpus.assert_called_once_with(8.0, [gpu0], gguf_path='llama-3.2-8b-instruct.Q4_K_M.gguf')
+                    mock_allocator_instance.execute.assert_called_once_with(8.0, [gpu0], gguf_path='llama-3.2-8b-instruct.Q4_K_M.gguf')
                      
                     # Server should be returned successfully with single GPU assignment
                     assert server is not None
@@ -344,7 +344,7 @@ class TestGPUAllocationIntegration:
                     assert server.gpu_assignment.estimated_vram_required == 8.0
             
     @patch('src.frameworks_drivers.model_repository.ModelRepository')
-    @patch('src.frameworks_drivers.gpu_detector.GPUDetector')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.GPUDetector')
     @patch('subprocess.Popen')
     def test_model_requires_multiple_gpus(self, mock_popen, mock_gpu_detector, mock_model_repository):
         """Test scenario: Model requires multiple GPUs."""
@@ -371,11 +371,11 @@ class TestGPUAllocationIntegration:
             tensor_splits=[0.5, 0.5],
             estimated_vram_required=20.0  # Large model requiring multiple GPUs
         )
-        mock_allocator_instance.allocate_gpus.return_value = mock_assignment
+        mock_allocator_instance.execute.return_value = mock_assignment
         
         # Replace the allocator in the GPU resource manager
         if pool.gpu_manager:
-            pool.gpu_manager.gpu_allocator = mock_allocator_instance
+            pool.gpu_manager.allocate_gpu_resources_use_case = mock_allocator_instance
         
         # Mock the health checker to return True for endpoint checks
         with patch('src.shared.health_checker.HealthChecker.check_http_endpoint', return_value=True):
@@ -386,7 +386,7 @@ class TestGPUAllocationIntegration:
                     server = asyncio.run(pool.get_server_for_model("llama-3.1-70b-instruct.Q4_K_M.gguf"))
                      
                     # Verify that allocation was called with the right parameters
-                    mock_allocator_instance.allocate_gpus.assert_called_once_with(20.0, [gpu0, gpu1], gguf_path='llama-3.1-70b-instruct.Q4_K_M.gguf')
+                    mock_allocator_instance.execute.assert_called_once_with(20.0, [gpu0, gpu1], gguf_path='llama-3.1-70b-instruct.Q4_K_M.gguf')
                      
                     # Server should be returned successfully with multi-GPU assignment
                     assert server is not None
@@ -395,7 +395,7 @@ class TestGPUAllocationIntegration:
                     assert server.gpu_assignment.estimated_vram_required == 20.0
             
     @patch('src.frameworks_drivers.model_repository.ModelRepository')
-    @patch('src.frameworks_drivers.gpu_detector.GPUDetector')
+    @patch('src.frameworks_drivers.gpu.gpu_detector.GPUDetector')
     @patch('subprocess.Popen')
     def test_insufficient_gpu_resources_for_model(self, mock_popen, mock_gpu_detector, mock_model_repository):
         """Test scenario: Insufficient GPU resources for model."""
@@ -416,11 +416,11 @@ class TestGPUAllocationIntegration:
         
         # Mock the GPU allocator in the GPU resource manager
         mock_allocator_instance = Mock()
-        mock_allocator_instance.allocate_gpus.return_value = None
+        mock_allocator_instance.execute.return_value = None
         
         # Replace the allocator in the GPU resource manager
         if pool.gpu_manager:
-            pool.gpu_manager.gpu_allocator = mock_allocator_instance
+            pool.gpu_manager.allocate_gpu_resources_use_case = mock_allocator_instance
         
         # Mock the health checker to return True for endpoint checks
         with patch('src.shared.health_checker.HealthChecker.check_http_endpoint', return_value=True):
@@ -431,7 +431,7 @@ class TestGPUAllocationIntegration:
                     server = asyncio.run(pool.get_server_for_model("llama-3.1-70b-instruct.Q4_K_M.gguf"))
                      
                     # Verify that allocation was called with the right parameters
-                    mock_allocator_instance.allocate_gpus.assert_called_once_with(15.0, [gpu0], gguf_path='llama-3.1-70b-instruct.Q4_K_M.gguf')
+                    mock_allocator_instance.execute.assert_called_once_with(15.0, [gpu0], gguf_path='llama-3.1-70b-instruct.Q4_K_M.gguf')
                      
                     # Server should be None due to insufficient GPU resources
                     assert server is None
@@ -439,7 +439,7 @@ class TestGPUAllocationIntegration:
     def test_allocation_decision_performance_timing(self):
         """Performance test: Allocation decisions complete within 10ms."""
         import time
-        from src.frameworks_drivers.gpu_allocator import AdaptiveGPUAllocator
+        from src.use_cases.allocate_gpu_resources import AdaptiveGPUAllocator
         from src.entities.gpu import GPU
         from src.entities.gpu_assignment import GPUAssignment
 
@@ -468,7 +468,7 @@ class TestGPUAllocationIntegration:
         
     def test_vram_estimation_accuracy(self):
         """Performance test: VRAM estimation accuracy within 10% of actual usage."""
-        from src.frameworks_drivers.gpu_allocator import AdaptiveGPUAllocator
+        from src.use_cases.allocate_gpu_resources import AdaptiveGPUAllocator
 
         allocator = AdaptiveGPUAllocator()
 
@@ -625,7 +625,7 @@ class TestCommandConstruction:
 
     def test_n_gpu_layers_calculation(self):
         """Test calculation of optimal n_gpu_layers based on model and VRAM."""
-        from src.frameworks_drivers.gpu_allocator import AdaptiveGPUAllocator
+        from src.use_cases.allocate_gpu_resources import AdaptiveGPUAllocator
         from src.entities.gpu_assignment import GPUAssignment
         from src.entities.gpu import GPU
 
@@ -645,7 +645,7 @@ class TestCommandConstruction:
         )
 
         # Mock GGUF utils to return 32 layers
-        with patch('src.utils.gguf_utils.GGUFUtils.get_model_layers_from_gguf', return_value=32):
+        with patch('src.shared.gguf_utils.GGUFUtils.get_model_layers_from_gguf', return_value=32):
             n_layers = allocator._calculate_optimal_n_gpu_layers("fake.gguf", assignment, available_gpus)
 
             # Total available VRAM: 38GB, required: 16GB, so proportion = 16/38 ≈ 0.42, layers = 32 * 0.42 ≈ 13.44, but min 1
@@ -654,7 +654,7 @@ class TestCommandConstruction:
 
     def test_n_gpu_layers_calculation_single_gpu(self):
         """Test n_gpu_layers calculation for single GPU."""
-        from src.frameworks_drivers.gpu_allocator import AdaptiveGPUAllocator
+        from src.use_cases.allocate_gpu_resources import AdaptiveGPUAllocator
         from src.entities.gpu_assignment import GPUAssignment
         from src.entities.gpu import GPU
 
@@ -670,7 +670,7 @@ class TestCommandConstruction:
             estimated_vram_required=8.0
         )
 
-        with patch('src.utils.gguf_utils.GGUFUtils.get_model_layers_from_gguf', return_value=32):
+        with patch('src.shared.gguf_utils.GGUFUtils.get_model_layers_from_gguf', return_value=32):
             n_layers = allocator._calculate_optimal_n_gpu_layers("fake.gguf", assignment, available_gpus)
 
             # Available VRAM (20GB) > required (8GB), so should return all layers

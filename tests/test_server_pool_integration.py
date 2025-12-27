@@ -10,16 +10,6 @@ from src.frameworks_drivers.config import ServerPoolConfig
 
 
 @pytest.fixture
-def server_pool_config():
-    return ServerPoolConfig(size=2, host="localhost", port_start=8080, gpu_layers=10, request_timeout=300)
-
-
-@pytest.fixture
-def server_pool(server_pool_config):
-    return ServerPool(server_pool_config)
-
-
-@pytest.fixture
 def server_pool_size1():
     config = ServerPoolConfig(size=1, host="localhost", port_start=8080, gpu_layers=10, request_timeout=300)
     return ServerPool(config)

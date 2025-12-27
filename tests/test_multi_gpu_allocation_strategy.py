@@ -7,7 +7,7 @@ import time
 
 from src.entities.gpu import GPU
 from src.entities.gpu_assignment import GPUAssignment
-from src.frameworks_drivers.gpu_allocator import (
+from src.use_cases.allocate_gpu_resources import (
     SingleGPUAllocationStrategy,
     MultiGPUAllocationStrategy,
     AdaptiveGPUAllocator

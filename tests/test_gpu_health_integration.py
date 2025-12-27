@@ -6,7 +6,7 @@ from src.entities.server import Server
 from src.entities.gpu_assignment import GPUAssignment
 from src.entities.gpu import GPU
 from src.use_cases.get_health import GetHealth
-from src.frameworks_drivers.gpu_monitor import GPUMonitor
+from src.frameworks_drivers.gpu.gpu_monitor import GPUMonitor
 from src.frameworks_drivers.model_repository import ModelRepository
 from src.frameworks_drivers.config import Config, GPUConfig
 
