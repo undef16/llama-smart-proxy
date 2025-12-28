@@ -36,6 +36,7 @@ class ServerLifecycleManager:
         self.config = config
         self.gpu_manager = gpu_manager
         self.servers: list[ServerInstance] = []
+        self.lock = asyncio.Lock()  # Thread safety for concurrent access
         self._initialize_servers()
 
     def _initialize_servers(self) -> None:
@@ -243,34 +244,35 @@ class ServerLifecycleManager:
         Check the health of all servers.
         Marks unhealthy servers and attempts to recover them.
         """
-        for server in self.servers:
-            if server.process is not None:
-                try:
-                    # Perform comprehensive health check
-                    is_healthy = await HealthChecker.check_server_health(
-                        "localhost", server.port, server.process, "/health", 5.0
-                    )
-                    if is_healthy:
-                        server.is_healthy = True
-                        logger.info(f"Health check passed for server {server.id}")
-                    else:
-                        raise Exception("Health check failed")
-                except Exception as e:
-                    logger.warning(f"Server {server.id} health check failed: {e}")
-                    server.is_healthy = False
-                    # Attempt to restart the server
-                    if server.model:
-                        logger.info(f"Attempting recovery for server {server.id} with model {server.model}")
-                        success = await self._load_model_into_server(server, server.model)
-                        server.is_healthy = success
-                        if success:
-                            logger.info(f"Recovery successful for server {server.id}")
+        async with self.lock:
+            for server in self.servers:
+                if server.process is not None:
+                    try:
+                        # Perform comprehensive health check
+                        is_healthy = await HealthChecker.check_server_health(
+                            "localhost", server.port, server.process, "/health", 5.0
+                        )
+                        if is_healthy:
+                            server.is_healthy = True
+                            logger.info(f"Health check passed for server {server.id}")
                         else:
-                            logger.warning(f"Recovery failed for server {server.id}")
-                            # Clean up GPU assignment if recovery failed
-                            if self.gpu_manager:
-                                self.gpu_manager.unregister_gpu_assignment(server.id)
-                                server.gpu_assignment = None
+                            raise Exception("Health check failed")
+                    except Exception as e:
+                        logger.warning(f"Server {server.id} health check failed: {e}")
+                        server.is_healthy = False
+                        # Attempt to restart the server
+                        if server.model:
+                            logger.info(f"Attempting recovery for server {server.id} with model {server.model}")
+                            success = await self._load_model_into_server(server, server.model)
+                            server.is_healthy = success
+                            if success:
+                                logger.info(f"Recovery successful for server {server.id}")
+                            else:
+                                logger.warning(f"Recovery failed for server {server.id}")
+                                # Clean up GPU assignment if recovery failed
+                                if self.gpu_manager:
+                                    self.gpu_manager.unregister_gpu_assignment(server.id)
+                                    server.gpu_assignment = None
 
     def shutdown(self) -> None:
         """Shutdown all servers in the pool."""

@@ -246,8 +246,8 @@ class E2ESimulation:
         return server_process
 
     def run(self):
-        # "ollama", 
-        backends = ["llama.cpp"]
+        #  
+        backends = ["ollama","llama.cpp"]
 
         overall_result = 0
 

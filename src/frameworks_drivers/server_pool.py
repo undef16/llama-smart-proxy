@@ -35,6 +35,7 @@ class ServerPool:
     def __init__(self, config: ServerPoolConfig, model_repository: Optional[ModelRepository] = None, full_config: Optional[Config] = None):
         self.config = config
         self.model_repository = model_repository  # Store model repository reference
+        self.lock = asyncio.Lock()  # Thread safety for concurrent access
         # Import GPU-related modules inside the initialization to handle import errors gracefully
         gpu_detector = None
         allocate_gpu_resources_use_case = None
@@ -95,48 +96,50 @@ class ServerPool:
         Returns:
             A ServerInstance if available, None if pool is full and no compatible server.
         """
-        logger.debug(f"get_server_for_model called with {model_identifier}")
-        # First, try to find a server already loaded with this model
-        for server in self.server_manager.servers:
-            if server.model == model_identifier and server.is_healthy:
-                server.last_used = time.time()
-                return server
+        async with self.lock:
+            logger.debug(f"get_server_for_model called with {model_identifier}")
+            # First, try to find a server already loaded with this model
+            for server in self.server_manager.servers:
+                if server.model == model_identifier and server.is_healthy:
+                    server.last_used = time.time()
+                    return server
 
-        # Then, find an idle server (no model loaded)
-        for server in self.server_manager.servers:
-            if server.process is None and server.is_healthy:
+            # Then, find an idle server (no model loaded)
+            for server in self.server_manager.servers:
+                if server.process is None and server.is_healthy:
+                    try:
+                        if await self.server_manager._load_model_into_server(server, model_identifier):
+                            server.last_used = time.time()
+                            return server
+                    except GPUAllocationError:
+                        # If GPU allocation failed, continue to try other servers
+                        logger.warning(f"GPU allocation failed for server {server.id}, trying next server")
+                        continue
+
+            # Finally, find the least recently used server to evict
+            # Sort by last_used, ascending (oldest first)
+            available_servers = [s for s in self.server_manager.servers if s.is_healthy]
+            if available_servers:
+                available_servers.sort(key=lambda s: s.last_used)
+                oldest_server = available_servers[0]
                 try:
-                    if await self.server_manager._load_model_into_server(server, model_identifier):
-                        server.last_used = time.time()
-                        return server
+                    if await self.server_manager._load_model_into_server(oldest_server, model_identifier):
+                        oldest_server.last_used = time.time()
+                        return oldest_server
                 except GPUAllocationError:
-                    # If GPU allocation failed, continue to try other servers
-                    logger.warning(f"GPU allocation failed for server {server.id}, trying next server")
-                    continue
+                    # If GPU allocation failed, return None to indicate failure
+                    logger.error(f"GPU allocation failed for all available servers when requesting model {model_identifier}")
+                    return None
 
-        # Finally, find the least recently used server to evict
-        # Sort by last_used, ascending (oldest first)
-        available_servers = [s for s in self.server_manager.servers if s.is_healthy]
-        if available_servers:
-            available_servers.sort(key=lambda s: s.last_used)
-            oldest_server = available_servers[0]
-            try:
-                if await self.server_manager._load_model_into_server(oldest_server, model_identifier):
-                    oldest_server.last_used = time.time()
-                    return oldest_server
-            except GPUAllocationError:
-                # If GPU allocation failed, return None to indicate failure
-                logger.error(f"GPU allocation failed for all available servers when requesting model {model_identifier}")
-                return None
-
-        return None
+            return None
             
     async def check_health(self) -> None:
         """
         Check the health of all servers.
         Marks unhealthy servers and attempts to recover them.
         """
-        await self.server_manager.check_health()
+        async with self.lock:
+            await self.server_manager.check_health()
 
     def get_pool_status(self) -> dict[str, Any]:
         """
@@ -145,6 +148,8 @@ class ServerPool:
         Returns:
             Dict with pool information.
         """
+        # Note: This method is synchronous, but since it's called from async context, we assume it's ok.
+        # If needed, make it async and use lock.
         result = {
             "total_servers": len(self.server_manager.servers),
             "healthy_servers": sum(1 for s in self.server_manager.servers if s.is_healthy),

@@ -38,12 +38,8 @@ if __name__ == "__main__":
         process_chat_completion = ProcessChatCompletion(llm_service, agent_manager)
         get_health = GetHealth(model_repository, gpu_monitor, config)
 
-        # Instantiate controllers
-        chat_controller = ChatController(process_chat_completion)
-        health_controller = HealthController(get_health)
-
-        # Instantiate API
-        api = API(chat_controller, health_controller)
+        # Instantiate API with dependencies
+        api = API(config, server_pool, model_resolver, agent_manager, model_repository, gpu_monitor)
 
         logger.info("Starting Llama Smart Proxy...")
         # Start the uvicorn server
