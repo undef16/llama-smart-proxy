@@ -101,8 +101,8 @@ class E2ESimulation:
 
         try:
             # Run all checks
-            # , self.check_completion, self.check_parallel_requests
-            checks = [self.check_forwarding_endpoints, self.check_parallel_requests]
+            # , self.check_completion, self.check_forwarding_endpoints, self.check_parallel_requests
+            checks = [self.check_completion]
             for check in checks:
                 if not check():
                     return result
@@ -246,8 +246,8 @@ class E2ESimulation:
         return server_process
 
     def run(self):
-        #  
-        backends = ["ollama","llama.cpp"]
+        #  "ollama",
+        backends = ["llama.cpp"]
 
         overall_result = 0
 

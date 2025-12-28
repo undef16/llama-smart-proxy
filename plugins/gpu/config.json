@@ -1,0 +1,4 @@
+{
+  "enabled": true,
+  "description": "GPU VRAM accuracy plugin that shows difference between estimated and actual VRAM usage"
+}

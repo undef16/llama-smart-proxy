@@ -12,7 +12,7 @@
   "messages": [
     {
       "role": "user",
-      "content": "Tell me a joke about a python programmer."
+      "content": "/gpu Tell me a joke about a python programmer."
     }
   ],
   "ollama_models": [

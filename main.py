@@ -27,7 +27,7 @@ if __name__ == "__main__":
 
         # Instantiate dependencies
         model_repository = ModelRepository()
-        agent_manager = AgentManager()
+        agent_manager = AgentManager(plugins_dir="plugins")
         server_pool = ServerPool(config.server_pool, model_repository, full_config=config)
         model_resolver = ModelResolver()
         gpu_monitor = GPUMonitor(config)

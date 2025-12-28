@@ -22,16 +22,17 @@ class AgentManager(AgentManagerProtocol):
         if not self.plugins_dir or not self.plugins_dir.exists():
             return
 
-        for agent_dir in self.plugins_dir.iterdir():
+        for agent_dir in self.plugins_dir.rglob("*"):
             if not agent_dir.is_dir():
                 continue
 
-            agent_name = agent_dir.name
             config_path = agent_dir / "config.json"
             agent_py_path = agent_dir / "agent.py"
 
             if not config_path.exists() or not agent_py_path.exists():
                 continue
+
+            agent_name = agent_dir.name
 
             try:
                 # Load config
