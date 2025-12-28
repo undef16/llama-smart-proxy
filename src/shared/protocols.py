@@ -1,8 +1,7 @@
-from typing import Protocol, Optional, Any, TypedDict, TYPE_CHECKING
+from typing import Protocol, Optional, Any, TypedDict
 
-if TYPE_CHECKING:
-    from src.entities.gpu import GPU
-    from src.entities.model import Model
+from src.entities.gpu import GPU
+from src.entities.model import Model
 
 
 class ModelDTO(TypedDict):

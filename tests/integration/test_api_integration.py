@@ -6,7 +6,7 @@ actual llama.cpp servers by mocking the server pool and model interactions.
 """
 
 import time
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch, PropertyMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -55,9 +55,18 @@ class TestAPIIntegration:
     @pytest.fixture
     def mock_model_repository(self):
         """Create mock model repository."""
-        mock_repo = Mock()
+        from src.entities.model import Model
+        from src.shared.protocols import ModelRepositoryProtocol
+        from unittest.mock import Mock
+
+        # Create a Mock with spec to avoid nested Mock issues
+        mock_repo = Mock(spec=ModelRepositoryProtocol)
         mock_repo.get_all_models.return_value = []
         mock_repo.get_servers_for_model.return_value = []
+        # Also mock get_model to return a proper model
+        model_mock = Mock()
+        model_mock.id = "test-model"
+        mock_repo.get_model.return_value = model_mock
         return mock_repo
 
     @pytest.fixture
@@ -96,85 +105,56 @@ class TestAPIIntegration:
     def api_client(self, test_config, mock_server_pool, mock_agent_manager, mock_http_response, mock_model_repository):
         """Create test client with mocked dependencies."""
         from unittest.mock import Mock
+        from src.frameworks_drivers.llm_service_factory import LLMServiceFactory
+        from src.frameworks_drivers.llama_cpp_service import LlamaCppLLMService
 
-        # Create mocked dependencies for API
-        mock_llm_service = Mock()
-        mock_llm_service.generate_completion = AsyncMock(return_value={"choices": [{"message": {"content": "Test response"}}]})
+        # Create mock model resolver
+        mock_model_resolver = Mock()
+        mock_model_resolver.resolve = Mock(return_value=("test/repo", "*.Q4_K_M.gguf"))
+
+        # Create mock gpu monitor
+        mock_gpu_monitor = Mock()
+        mock_gpu_monitor.get_gpu_info = Mock(return_value={"count": 0, "memory": []})
+        # Set the initialized property to return a boolean value
+        type(mock_gpu_monitor).initialized = PropertyMock(return_value=False)
+
+        # Create a mock LlamaCppLLMService that calls the server pool as expected by tests
+        mock_llm_service = Mock(spec=LlamaCppLLMService)
+
+        # Mock generate_completion to call the server pool method as expected by the test
+        async def mock_generate_completion(request):
+            # Simulate calling the server pool to get a server
+            model = request.get("model", "test-model")
+            server = await mock_server_pool.get_server_for_model(model)
+
+            # Check if no server is available and return an error response
+            if server is None:
+                return {"error": {"message": "No available server for model: " + model, "type": "server_not_available"}}
+
+            # Return the expected response when server is available
+            return {"choices": [{"message": {"content": "Test response"}}]}
+
+        mock_llm_service.generate_completion = mock_generate_completion
         mock_llm_service.forward_request = AsyncMock()
 
-        mock_llm_service = Mock()
-        mock_llm_service.generate_completion = AsyncMock(return_value={"choices": [{"message": {"content": "Test response"}}]})
+        # Patch the LLMServiceFactory to return our mock service
+        with patch.object(LLMServiceFactory, 'create_service', return_value=mock_llm_service):
+            # Create API instance with all required parameters
+            api_instance = API(
+                config=test_config,
+                server_pool=mock_server_pool,
+                model_resolver=mock_model_resolver,
+                agent_manager=mock_agent_manager,
+                model_repository=mock_model_repository,
+                gpu_monitor=mock_gpu_monitor
+            )
 
-        async def process_execute(request):
-            # Simulate the real use case: get server, then call llm_service
-            server = await mock_server_pool.get_server_for_model(request["model"])
-            if server is None:
-                raise Exception("No available server")
-            return await mock_llm_service.generate_completion(request)
-
-        mock_process_chat_completion = Mock()
-        mock_process_chat_completion.execute = AsyncMock(side_effect=process_execute)
-        mock_process_chat_completion.llm_service = mock_llm_service
-
-        # Create chat controller that actually calls the mocks
-        async def chat_completions(request):
-            # Call the underlying mocks as the real controller would
-            try:
-                result = await mock_process_chat_completion.execute(request)
-                return result
-            except Exception as e:
-                return {
-                    "error": {
-                        "message": f"Internal server error: {str(e)}",
-                        "type": "internal_error"
-                    }
-                }
-
-        mock_chat_controller = Mock()
-        mock_chat_controller.chat_completions = AsyncMock(side_effect=chat_completions)
-        mock_chat_controller.process_chat_completion_use_case = mock_process_chat_completion
-
-        # Create get_health use case that actually calls the mocks
-        def get_health_execute():
-            # Call the underlying mocks as the real use case would
-            models = mock_model_repository.get_all_models()
-            servers = []
-            for model in models:
-                model_servers = mock_model_repository.get_servers_for_model(model.id)
-                servers.extend(model_servers)
-            return {"servers": [server.model_dump() for server in servers]}
-
-        mock_get_health = Mock()
-        mock_get_health.execute = Mock(side_effect=get_health_execute)
-
-        # Create health controller that actually calls the mocks
-        def health():
-            # Call the underlying mocks as the real controller would
-            try:
-                return mock_get_health.execute()
-            except Exception as e:
-                return {
-                    "error": {
-                        "message": f"Health check failed: {str(e)}",
-                        "type": "health_check_error"
-                    }
-                }
-
-        mock_health_controller = Mock()
-        mock_health_controller.health = Mock(side_effect=health)
-
-        # Create API instance with mocked controllers
-        api_instance = API(mock_chat_controller, mock_health_controller)
-
-        # Attach controllers to app for testing access
-        api_instance.app.chat_controller = mock_chat_controller
-
-        # Patch requests for any HTTP calls that might happen
-        with patch("requests.post", return_value=mock_http_response), patch(
-            "requests.get", return_value=mock_http_response,
-        ):
-            client = TestClient(api_instance.app)
-            yield client
+            # Patch requests for any HTTP calls that might happen
+            with patch("requests.post", return_value=mock_http_response), patch(
+                "requests.get", return_value=mock_http_response,
+            ):
+                client = TestClient(api_instance.app)
+                yield client
 
     class TestHealthEndpoint:
         """Test /health endpoint."""
@@ -262,10 +242,10 @@ class TestAPIIntegration:
 
             response = api_client.post("/chat/completions", json=request_data)
 
-            # No validation, so it forwards as is
-            assert response.status_code == 200
+            # Validation rejects empty messages
+            assert response.status_code == 400
             data = response.json()
-            assert "choices" in data
+            assert "detail" in data  # FastAPI validation error
 
         def test_chat_completions_last_message_not_user(self, api_client):
             """Test chat completion when last message is not from user."""
@@ -296,27 +276,6 @@ class TestAPIIntegration:
             assert "message" in data["error"]
             assert "No available server" in data["error"]["message"]
 
-        def test_chat_completions_model_generation_error(
-            self, api_client, mock_agent_manager, mock_server_pool, mock_http_response,
-        ):
-            """Test chat completion when model generation fails."""
-            # Modify the mock to raise an exception
-            async def failing_generate_completion(request):
-                raise Exception("Model generation failed")
-
-            # Replace the mock service's method
-            api_client.app.chat_controller.process_chat_completion_use_case.llm_service.generate_completion = failing_generate_completion
-
-            request_data = {"model": "test-model", "messages": [{"role": "user", "content": "Hello"}]}
-
-            response = api_client.post("/chat/completions", json=request_data)
-
-            assert response.status_code == 200
-            data = response.json()
-            assert "error" in data
-            assert "message" in data["error"]
-            assert "Model generation failed" in data["error"]["message"]
-
         def test_chat_completions_with_agent_hooks(
             self, api_client, mock_agent_manager, mock_server_pool, mock_http_response,
         ):
@@ -331,6 +290,61 @@ class TestAPIIntegration:
             # Verify response structure (raw from llama-server)
             data = response.json()
             assert "choices" in data
+
+    @pytest.fixture
+    def api_client_with_error_service(self, test_config, mock_server_pool, mock_agent_manager, mock_http_response, mock_model_repository):
+        """Create test client with mocked dependencies where LLM service throws errors."""
+        from unittest.mock import Mock, AsyncMock
+        from src.frameworks_drivers.llm_service_factory import LLMServiceFactory
+        from src.frameworks_drivers.llama_cpp_service import LlamaCppLLMService
+
+        # Create mock model resolver
+        mock_model_resolver = Mock()
+        mock_model_resolver.resolve = Mock(return_value=("test/repo", "*.Q4_K_M.gguf"))
+
+        # Create mock gpu monitor
+        mock_gpu_monitor = Mock()
+        mock_gpu_monitor.get_gpu_info = Mock(return_value={"count": 0, "memory": []})
+        # Set the initialized property to return a boolean value
+        type(mock_gpu_monitor).initialized = PropertyMock(return_value=False)
+
+        # Create a mock LlamaCppLLMService that throws an exception
+        mock_llm_service = Mock(spec=LlamaCppLLMService)
+        mock_llm_service.generate_completion = AsyncMock(side_effect=Exception("Model generation failed"))
+        mock_llm_service.forward_request = AsyncMock()
+
+        # Patch the LLMServiceFactory to return our error mock service
+        with patch.object(LLMServiceFactory, 'create_service', return_value=mock_llm_service):
+            # Create API instance with all required parameters
+            api_instance = API(
+                config=test_config,
+                server_pool=mock_server_pool,
+                model_resolver=mock_model_resolver,
+                agent_manager=mock_agent_manager,
+                model_repository=mock_model_repository,
+                gpu_monitor=mock_gpu_monitor
+            )
+
+            # Patch requests for any HTTP calls that might happen
+            with patch("requests.post", return_value=mock_http_response), patch(
+                "requests.get", return_value=mock_http_response,
+            ):
+                client = TestClient(api_instance.app)
+                yield client
+
+    def test_chat_completions_model_generation_error(
+        self, api_client_with_error_service, mock_agent_manager, mock_server_pool, mock_http_response,
+    ):
+        """Test chat completion when model generation fails."""
+        request_data = {"model": "test-model", "messages": [{"role": "user", "content": "Hello"}]}
+
+        response = api_client_with_error_service.post("/chat/completions", json=request_data)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "error" in data
+        assert "message" in data["error"]
+        assert "Model generation failed" in data["error"]["message"]
 
         def test_chat_completions_with_slash_commands(
             self, api_client, mock_agent_manager, mock_server_pool, mock_http_response,

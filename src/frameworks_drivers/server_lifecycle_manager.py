@@ -3,25 +3,15 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
-import time
-from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Optional
 
-from src.frameworks_drivers.config import ServerPoolConfig, Config
+from src.frameworks_drivers.config import ServerPoolConfig
 from src.frameworks_drivers.gpu.gpu_resource_manager import GPUResourceManager
 from src.frameworks_drivers.server_instance import ServerInstance
 from src.shared.errors import GPUAllocationError
 from src.shared.health_checker import HealthChecker
 from src.shared.logger import Logger
-from src.entities.performance_monitor import PerformanceMonitor
 
-# Import GPU-related modules
-if TYPE_CHECKING:
-    from src.entities.gpu_assignment import GPUAssignment
-    from src.use_cases.allocate_gpu_resources import AdaptiveGPUAllocator
-    from src.frameworks_drivers.gpu_detector import GPUDetector
-    from src.frameworks_drivers.gpu_monitor import GPUMonitor
-    from src.frameworks_drivers.model_repository import ModelRepository
 
 logger = Logger.get(__name__)
 
